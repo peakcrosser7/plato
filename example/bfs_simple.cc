@@ -28,49 +28,59 @@
 #include "plato/graph/graph.hpp"
 #include "plato/algo/bfs/bfs.hpp"
 
+// 定义命令行参数
 DEFINE_string(input,       "",     "input file, in csv format, without edge data");
 DEFINE_bool(is_directed,   false,  "is graph directed or not");
 DEFINE_uint32(root,        0,      "start bfs from which vertex");
 DEFINE_int32(alpha,        -1,     "alpha value used in sequence balance partition");
 DEFINE_bool(part_by_in,    false,  "partition by in-degree");
 
+/// @brief 用于检测命令行参数input是否有效
+/// @param value 命令行参数的值
+/// @return 字符串不为空
 bool string_not_empty(const char*, const std::string& value) {
   if (0 == value.length()) { return false; }
   return true;
 }
 
+// 定义命令行参数有效检测函数
 DEFINE_validator(input, &string_not_empty);
 
-void init(int argc, char** argv) {
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
-  google::InitGoogleLogging(argv[0]);
-  google::LogToStderr();
+/// @brief 应用初始化
+void init(int argc, char **argv) {
+    // 解析命令行参数,第3个参数表示是否从原命令行参数argv中删除删除
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
+    // 初始化Google日志库
+    google::InitGoogleLogging(argv[0]);
+    // 设置日志输出到stderr
+    google::LogToStderr();
 }
 
-int main(int argc, char** argv) {
-  plato::stop_watch_t watch;
-  auto& cluster_info = plato::cluster_info_t::get_instance();
+int main(int argc, char **argv) {
+    plato::stop_watch_t watch;
+    // 集群信息
+    auto &cluster_info = plato::cluster_info_t::get_instance();
 
-  init(argc, argv);
-  cluster_info.initialize(&argc, &argv);
+    // 初始化
+    init(argc, argv);
+    cluster_info.initialize(&argc, &argv);
 
-  plato::graph_info_t graph_info(FLAGS_is_directed);
-  auto graph = plato::create_dualmode_seq_from_path<plato::empty_t>(&graph_info, FLAGS_input,
-      plato::edge_format_t::CSV, plato::dummy_decoder<plato::empty_t>,
-      FLAGS_alpha, FLAGS_part_by_in);
+    plato::graph_info_t graph_info(FLAGS_is_directed);
+    auto graph = plato::create_dualmode_seq_from_path<plato::empty_t>(
+        &graph_info, FLAGS_input, plato::edge_format_t::CSV,
+        plato::dummy_decoder<plato::empty_t>, FLAGS_alpha, FLAGS_part_by_in);
 
-  plato::algo::bfs_opts_t opts;
-  opts.root_ = FLAGS_root;
+    plato::algo::bfs_opts_t opts;
+    opts.root_ = FLAGS_root;
 
-  watch.mark("t0");
-  plato::vid_t visited = plato::algo::breadth_first_search(graph.second, graph.first,
-      graph_info, opts);
+    watch.mark("t0");
+    plato::vid_t visited = plato::algo::breadth_first_search(
+        graph.second, graph.first, graph_info, opts);
 
-  if (0 == cluster_info.partition_id_) {
-    LOG(INFO) << "bfs done, visited: " << visited << ", cost: "
-      << watch.show("t0") / 1000.0 << "s";
-  }
+    if (0 == cluster_info.partition_id_) {
+        LOG(INFO) << "bfs done, visited: " << visited
+                  << ", cost: " << watch.show("t0") / 1000.0 << "s";
+    }
 
-  return 0;
+    return 0;
 }
-

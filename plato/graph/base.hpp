@@ -40,243 +40,274 @@
 
 #include "plato/util/backtrace.h"
 
+// 声明命令行参数:线程数
 DECLARE_int32(threads);
 
-#define PAGESIZE  (1 << 12)
-#define HUGESIZE  (1 << 20)
+#define PAGESIZE (1 << 12)
+#define HUGESIZE (1 << 20)
 #define CHUNKSIZE (1 << 6)
 
-#define MBYTES    (1   << 20)
-#define GBYTES    (1UL << 30UL)
-#define TBYTES    (1UL << 40UL)
+#define MBYTES (1 << 20)
+#define GBYTES (1UL << 30UL)
+#define TBYTES (1UL << 40UL)
 
-#define likely(x)   __builtin_expect((x),1)
-#define unlikely(x) __builtin_expect((x),0)
+#define likely(x) __builtin_expect((x), 1)
+#define unlikely(x) __builtin_expect((x), 0)
 
 namespace plato {
 
 using vid_t = std::uint32_t;
 using eid_t = std::uint64_t;
 
-struct empty_t { };
+struct empty_t {};
 
-enum class edge_format_t {
-  UNKNOWN = 0,
-  CSV     = 1
-};
+enum class edge_format_t { UNKNOWN = 0, CSV = 1 };
 
 inline std::string edgeformat2name(edge_format_t format) {
-  switch (format) {
-  case edge_format_t::CSV:
-    return "csv";
-  default:
-    return "unknown";
-  }
+    switch (format) {
+        case edge_format_t::CSV:
+            return "csv";
+        default:
+            return "unknown";
+    }
 }
 
 inline edge_format_t name2edgeformat(const std::string& name) {
-  if ("csv" == name || "CSV" == name) {
-    return edge_format_t::CSV;
-  }
-  return edge_format_t::UNKNOWN;
+    if ("csv" == name || "CSV" == name) {
+        return edge_format_t::CSV;
+    }
+    return edge_format_t::UNKNOWN;
 }
 
-// ******************************************************************************* //
-// basic graph structure
+// *******************************************************************************
+// // basic graph structure
 
 template <typename EDATA_T, typename VID_T = vid_t>
 struct edge_unit_t {
-  VID_T   src_;
-  VID_T   dst_;
-  EDATA_T edata_;
-
-  template<typename Ar>
-  void serialize(Ar &ar) { // boost-style serialization when EDATA_T is non-trivial
-      ar & src_ & dst_ & edata_;
-  }
-};// __attribute__((packed));
-
-template<typename VID_T>
-struct edge_unit_t<empty_t, VID_T> {
-  VID_T src_;
-  union {
+    VID_T src_;
     VID_T dst_;
-    empty_t edata_;
-  };
-};// __attribute__((packed));
+    EDATA_T edata_;
+
+    template <typename Ar>
+    void serialize(
+        Ar& ar) {  // boost-style serialization when EDATA_T is non-trivial
+        ar& src_& dst_& edata_;
+    }
+};  // __attribute__((packed));
+
+template <typename VID_T>
+struct edge_unit_t<empty_t, VID_T> {
+    VID_T src_;
+    union {
+        VID_T dst_;
+        empty_t edata_;
+    };
+};  // __attribute__((packed));
 
 template <typename EDATA_T>
 struct adj_unit_t {
-  vid_t    neighbour_;
-  EDATA_T  edata_;
+    vid_t neighbour_;
+    EDATA_T edata_;
 
-  template<typename Ar>
-  void serialize(Ar &ar) { // boost-style serialization when EDATA_T is non-trivial
-      ar & neighbour_ & edata_;
-  }
-};// __attribute__((packed));
+    template <typename Ar>
+    void serialize(
+        Ar& ar) {  // boost-style serialization when EDATA_T is non-trivial
+        ar& neighbour_& edata_;
+    }
+};  // __attribute__((packed));
 
 template <>
 struct adj_unit_t<empty_t> {
-  union {
-    vid_t   neighbour_;
-    empty_t edata_;
-  };
+    union {
+        vid_t neighbour_;
+        empty_t edata_;
+    };
 
-  template<typename Ar>
-  void serialize(Ar &ar) {
-    ar & neighbour_;
-  }
-};// __attribute__((packed));
+    template <typename Ar>
+    void serialize(Ar& ar) {
+        ar& neighbour_;
+    }
+};  // __attribute__((packed));
 
 template <typename EDATA_T>
 struct adj_unit_list_t {
-  adj_unit_t<EDATA_T>* begin_;
-  adj_unit_t<EDATA_T>* end_;
+    adj_unit_t<EDATA_T>* begin_;
+    adj_unit_t<EDATA_T>* end_;
 
-  adj_unit_list_t(void)
-    : begin_(nullptr), end_(nullptr) {  }
+    adj_unit_list_t(void) : begin_(nullptr), end_(nullptr) {}
 
-  adj_unit_list_t(adj_unit_t<EDATA_T>* begin, adj_unit_t<EDATA_T>* end)
-    : begin_(begin), end_(end) {  }
+    adj_unit_list_t(adj_unit_t<EDATA_T>* begin, adj_unit_t<EDATA_T>* end)
+        : begin_(begin), end_(end) {}
 };
 
-template <typename VDATA_T,
-  typename = typename std::enable_if<sizeof(VDATA_T) != 0, std::true_type>::type>
+template <typename VDATA_T, typename = typename std::enable_if<
+                                sizeof(VDATA_T) != 0, std::true_type>::type>
 struct vertex_unit_t {
-  vid_t   vid_;
-  VDATA_T vdata_;
+    vid_t vid_;
+    VDATA_T vdata_;
 
-  template<typename Ar>
-  void serialize(Ar &ar) { // boost-style serialization when VDATA_T is non-trivial
-    ar & vid_ & vdata_;
-  }
-}; // __attribute__((packed));
+    template <typename Ar>
+    void serialize(
+        Ar& ar) {  // boost-style serialization when VDATA_T is non-trivial
+        ar& vid_& vdata_;
+    }
+};  // __attribute__((packed));
 
-// ******************************************************************************* //
+// *******************************************************************************
+// //
 
-struct cluster_info_t {  // user should keep this struct alive during whole process lifetime
-  int partitions_;
-  int partition_id_;
+// user should keep this struct alive during whole process lifetime
+/// @brief 集群信息
+struct cluster_info_t {
+    /// @brief 分区总数(MPI进程总数)
+    int partitions_;
+    /// @brief 分区ID(进程ID)
+    int partition_id_;
 
-  int threads_;
-  int sockets_;
+    /// @brief 线程总数
+    int threads_;
+    /// @brief NUMA节点数
+    int sockets_;
 
-  static cluster_info_t& get_instance(void) {
-    static cluster_info_t instance;
-    return instance;
-  }
-
-  void initialize(int* argc, char*** argv) {
-    install_oneshot_signal_handlers();
-
-    int provided;
-    MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
-    MPI_Comm_size(MPI_COMM_WORLD, &partitions_);
-    MPI_Comm_rank(MPI_COMM_WORLD, &partition_id_);
-
-    if (0 == partition_id_) {
-      LOG(INFO) << "thread support level provided by MPI: ";
-      switch (provided) {
-      case MPI_THREAD_MULTIPLE:
-        LOG(INFO) << "MPI_THREAD_MULTIPLE";   break;
-      case MPI_THREAD_SERIALIZED:
-        LOG(INFO) << "MPI_THREAD_SERIALIZED"; break;
-      case MPI_THREAD_FUNNELED:
-        LOG(INFO) << "MPI_THREAD_FUNNELED";   break;
-      case MPI_THREAD_SINGLE:
-        LOG(INFO) << "MPI_THREAD_SINGLE";     break;
-      default:
-        CHECK(false) << "unknown mpi thread support level(" << provided << ")";
-      }
+    /// @brief 获取集群信息单例
+    static cluster_info_t& get_instance(void) {
+        static cluster_info_t instance;
+        return instance;
     }
 
-    if (0 < FLAGS_threads) {
-      threads_ = FLAGS_threads;
-    } else if (nullptr != std::getenv("OMP_NUM_THREADS")) {
-      threads_ = (int)std::strtol(std::getenv("OMP_NUM_THREADS"), nullptr, 10);
-    } else {
-      threads_ = numa_num_configured_cpus();
+    /// @brief 集群初始化
+    void initialize(int* argc, char*** argv) {
+        // 安装信号处理函数
+        install_oneshot_signal_handlers();
+
+        int provided;
+        // `MPI_Init_thread()`:初始化MPI执行环境
+        // `MPI_THREAD_MULTIPLE`:多个线程可调用MPI
+        MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
+        // `MPI_Comm_size()`:确定与通信器相关联的组的大小
+        // `MPI_COMM_WORLD`:MPI程序中的所有进程
+        // 确定总进程数
+        MPI_Comm_size(MPI_COMM_WORLD, &partitions_);
+        // `MPI_Comm_rank`:确定调用进程在通信器中的序号
+        // 确定当前进程id
+        MPI_Comm_rank(MPI_COMM_WORLD, &partition_id_);
+
+        if (0 == partition_id_) {
+            LOG(INFO) << "thread support level provided by MPI: ";
+            switch (provided) {
+                case MPI_THREAD_MULTIPLE:
+                    LOG(INFO) << "MPI_THREAD_MULTIPLE";
+                    break;
+                case MPI_THREAD_SERIALIZED:
+                    LOG(INFO) << "MPI_THREAD_SERIALIZED";
+                    break;
+                case MPI_THREAD_FUNNELED:
+                    LOG(INFO) << "MPI_THREAD_FUNNELED";
+                    break;
+                case MPI_THREAD_SINGLE:
+                    LOG(INFO) << "MPI_THREAD_SINGLE";
+                    break;
+                default:
+                    CHECK(false) << "unknown mpi thread support level("
+                                 << provided << ")";
+            }
+        }
+
+        if (0 < FLAGS_threads) {  // 若命令行定义了线程数
+            threads_ = FLAGS_threads;
+        } else if (nullptr !=
+                   std::getenv("OMP_NUM_THREADS")) {  // 若环境变量定义了线程数
+            threads_ =
+                (int)std::strtol(std::getenv("OMP_NUM_THREADS"), nullptr, 10);
+        } else {
+            // `numa_num_configured_cpus()`:返回系统中已配置的CPU核心数量
+            threads_ = numa_num_configured_cpus();
+        }
+        // `omp_set_dynamic()`:指示即将出现的并行区域中可用的线程数是否可由运行时调整
+        // 指明运行时不会动态调整线程数
+        omp_set_dynamic(0);
+        // `omp_set_num_threads()`:设置即将出现的并行区域中的线程数
+        omp_set_num_threads(threads_);
+        // `numa_num_configured_nodes()`:获取系统中已配置的NUMA节点数量
+        sockets_ = numa_num_configured_nodes();
+
+        // struct bitmask* nodemask = numa_parse_nodestring("all");
+        // numa_set_interleave_mask(nodemask);
+        // numa_bitmask_free(nodemask);
+
+        if (0 == partition_id_) {
+            LOG(INFO) << "threads: " << threads_;
+            LOG(INFO) << "sockets: " << sockets_;
+            LOG(INFO) << "partitions: " << partitions_;
+        }
+
+        initialized = true;
     }
-    omp_set_dynamic(0);
-    omp_set_num_threads(threads_);
 
-    sockets_ = numa_num_configured_nodes();
+    cluster_info_t(const cluster_info_t&) = delete;
+    void operator=(const cluster_info_t&) = delete;
 
-    // struct bitmask* nodemask = numa_parse_nodestring("all");
-    // numa_set_interleave_mask(nodemask);
-    // numa_bitmask_free(nodemask);
-
-    if (0 == partition_id_) {
-      LOG(INFO) << "threads: " << threads_;
-      LOG(INFO) << "sockets: " << sockets_;
-      LOG(INFO) << "partitions: " << partitions_;
+    ~cluster_info_t(void) {
+        if (initialized) {
+            MPI_Finalize();
+        }
     }
 
-    initialized = true;
-  }
+   protected:
+    cluster_info_t(void)
+        : partitions_(-1),
+          partition_id_(-1),
+          threads_(-1),
+          sockets_(-1),
+          initialized(false) {}
 
-  cluster_info_t(const cluster_info_t&) = delete;
-  void operator=(const cluster_info_t&) = delete;
-
-  ~cluster_info_t(void) {
-    if (initialized) { MPI_Finalize(); }
-  }
-
-protected:
-  cluster_info_t(void)
-    : partitions_(-1), partition_id_(-1), threads_(-1), sockets_(-1),
-      initialized(false) { }
-
-  bool initialized;
-
+    /// @brief 初始化标志
+    bool initialized;
 };
 
 using graph_info_mask_t = uint64_t;
 
-#define GRAPH_INFO_VERTICES   (1UL << 0UL)
-#define GRAPH_INFO_EDGES      (1UL << 1UL)
+#define GRAPH_INFO_VERTICES (1UL << 0UL)
+#define GRAPH_INFO_EDGES (1UL << 1UL)
 #define GRAPH_INFO_OUT_DEGREE (1UL << 2UL)
 
 struct graph_info_t {
-  // input params
-  bool  is_directed_;
+    // input params
+    bool is_directed_;
 
-  // output params
-  vid_t vertices_;
-  eid_t edges_;
-  vid_t max_v_i_;  // maximum vertex's id
+    // output params
+    vid_t vertices_;
+    eid_t edges_;
+    vid_t max_v_i_;  // maximum vertex's id
 
-  graph_info_t(void)
-    : is_directed_(false), vertices_(0), edges_(0), max_v_i_(0)
-  { }
+    graph_info_t(void)
+        : is_directed_(false), vertices_(0), edges_(0), max_v_i_(0) {}
 
-  graph_info_t(bool is_directed)
-    : is_directed_(is_directed), vertices_(0), edges_(0), max_v_i_(0)
-  { }
+    graph_info_t(bool is_directed)
+        : is_directed_(is_directed), vertices_(0), edges_(0), max_v_i_(0) {}
 };
 
-// ******************************************************************************* //
+// *******************************************************************************
+// //
 
-
-// ******************************************************************************* //
-// traverse options
+// *******************************************************************************
+// // traverse options
 
 enum class traverse_mode_t {
-  ORIGIN = 1,  // let structure decide
-  RANDOM = 2,
-  CIRCLE = 3
+    ORIGIN = 1,  // let structure decide
+    RANDOM = 2,
+    CIRCLE = 3
 };
 
 // traverse related
 struct traverse_opts_t {
-  traverse_mode_t mode_ = traverse_mode_t::ORIGIN;
-  bool auto_release_ = false;
+    traverse_mode_t mode_ = traverse_mode_t::ORIGIN;
+    bool auto_release_ = false;
 };
 
-// ******************************************************************************* //
+// *******************************************************************************
+// //
 
 }  // namespace plato
 
 #endif
-
