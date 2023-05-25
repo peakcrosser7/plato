@@ -37,9 +37,12 @@
 
 namespace plato {
 
+/// @brief 字偏移
+/// @param idx 索引
 inline size_t word_offset(size_t idx) { return (idx >> 6); };
 inline size_t bits_offset(size_t idx) { return (idx & (size_t)0x3F); };
 
+/// @brief 位图
 template <typename ALLOC = std::allocator<uint64_t>>
 class bitmap_t {
 public:
@@ -93,8 +96,11 @@ public:
    * */
   bool next_chunk(traversal_t traversal, size_t* chunk_size) const ;
 
+  /// @brief 大小
   size_t              size_;
+  /// @brief 数据数组
   uint64_t*           data_;
+  /// @brief 分配器
   allocator_type      allocator_;
 
 protected:
@@ -156,6 +162,7 @@ bitmap_t<ALLOC>::~bitmap_t(void) {
   }
 }
 
+/// @brief 清空数据(并行)
 template <typename ALLOC>
 void bitmap_t<ALLOC>::clear(void) {
   size_t bm_size = word_offset(size_);

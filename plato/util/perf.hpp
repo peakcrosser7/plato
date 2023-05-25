@@ -62,15 +62,20 @@ inline void self_mem_usage(mem_status_t* status) {
   fclose(file);
 }
 
+/// @brief 当前时间
+/// @return 以毫秒为单位的当前时间
 inline double current_milliseconds(void) {
   struct timeval tv;
   gettimeofday(&tv, nullptr);
   return tv.tv_sec * 1000UL + tv.tv_usec / 1000UL;
 }
 
+/// @brief 计时器
 class stop_watch_t {
 public:
   // start a new mark
+  /// @brief 记录一个新的时间
+  /// @param smark 标志字符串
   void mark(const std::string& smark) {
     mark_[smark] = current_milliseconds();
   }

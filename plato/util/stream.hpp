@@ -34,6 +34,7 @@
 
 namespace plato {
 
+/// @brief 内存输入流
 struct mem_ostream_t {
   mem_ostream_t(const mem_ostream_t&) = delete;
 

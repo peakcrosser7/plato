@@ -82,15 +82,19 @@ inline edge_format_t name2edgeformat(const std::string& name) {
 // *******************************************************************************
 // // basic graph structure
 
+/// @brief 边类型
 template <typename EDATA_T, typename VID_T = vid_t>
 struct edge_unit_t {
+    /// @brief 起始结点
     VID_T src_;
+    /// @brief 终止结点
     VID_T dst_;
+    /// @brief 边数据
     EDATA_T edata_;
 
     template <typename Ar>
-    void serialize(
-        Ar& ar) {  // boost-style serialization when EDATA_T is non-trivial
+    void serialize(Ar& ar) {  
+        // boost-style serialization when EDATA_T is non-trivial
         ar& src_& dst_& edata_;
     }
 };  // __attribute__((packed));
@@ -271,13 +275,17 @@ using graph_info_mask_t = uint64_t;
 #define GRAPH_INFO_EDGES (1UL << 1UL)
 #define GRAPH_INFO_OUT_DEGREE (1UL << 2UL)
 
+/// @brief 图信息
 struct graph_info_t {
     // input params
+
+    // 是否是有向图
     bool is_directed_;
 
     // output params
     vid_t vertices_;
     eid_t edges_;
+    /// @brief 最大结点ID
     vid_t max_v_i_;  // maximum vertex's id
 
     graph_info_t(void)

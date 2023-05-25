@@ -46,6 +46,7 @@ protected:
 
 /***************************************************************************/
 
+/// @brief 基于shared_ptr的缓存
 struct shared_buffer_t {
   typedef std::shared_ptr<char> shared_array_type;
 
@@ -87,7 +88,9 @@ struct shared_buffer_t {
     }
   }
 
+  /// @brief 缓存数组
   shared_array_type data_;
+  /// @brief 缓存大小
   std::size_t       size_;
 
 protected:

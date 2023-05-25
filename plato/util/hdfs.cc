@@ -32,101 +32,112 @@
 namespace plato {
 
 std::mutex hdfs_t::mtx4inst_;
+/// @brief HDFS文件单例缓存
 std::map<std::string, std::shared_ptr<hdfs_t>> hdfs_t::instances_;
 
+/// @brief 从HDFS路径中返回名称节点(NameNode)
+/// @param path HDFS路径
+/// @return 名称节点
 std::string hdfs_t::get_nm_from_path(const std::string& path) {
-  if (boost::istarts_with(path, "hdfs://")) {
-    std::vector<std::string> splits;
-    boost::split(splits, path, boost::is_any_of("/"));
+    if (boost::istarts_with(path, "hdfs://")) {
+        std::vector<std::string> splits;
+        boost::split(splits, path, boost::is_any_of("/"));
 
-    CHECK(splits.size() >= 3) << splits.size() << ", " << path;
-    return splits[2];
-  } else {
-    return "default";
-  }
+        CHECK(splits.size() >= 3) << splits.size() << ", " << path;
+        return splits[2];
+    } else {
+        return "default";
+    }
 }
 
 hdfs_t& hdfs_t::get_hdfs(void) {
-  std::lock_guard<std::mutex> lck(mtx4inst_);
+    std::lock_guard<std::mutex> lck(mtx4inst_);
 
-  if (instances_.count("default")) {
+    if (instances_.count("default")) {
+        return *instances_["default"];
+    } else {
+        instances_.emplace("default", std::shared_ptr<hdfs_t>(new hdfs_t()));
+    }
     return *instances_["default"];
-  } else {
-    instances_.emplace("default", std::shared_ptr<hdfs_t>(new hdfs_t()));
-  }
-  return *instances_["default"];
 }
 
+/// @brief 获取HDFS文件
+/// @param path 文件路径
+/// @return HDFS文件
 hdfs_t& hdfs_t::get_hdfs(const std::string& path) {
-  std::lock_guard<std::mutex> lck(mtx4inst_);
+    std::lock_guard<std::mutex> lck(mtx4inst_);
 
-  std::string nm = get_nm_from_path(path);
-  if (instances_.count(nm)) {
+    std::string nm = get_nm_from_path(path);  // NameNode
+    if (instances_.count(nm)) { // 在缓存中直接返回
+        return *instances_[nm];
+    } else {
+        // 得到HDFS文件并缓存
+        instances_.emplace(nm, std::shared_ptr<hdfs_t>(new hdfs_t(nm)));
+    }
     return *instances_[nm];
-  } else {
-    instances_.emplace(nm, std::shared_ptr<hdfs_t>(new hdfs_t(nm)));
-  }
-  return *instances_[nm];
 }
 
-void hdfs_t::parse_csv_files(const hdfs_t& fs, const std::vector<std::string>& chunks,
-    std::function<void(const std::vector<std::vector<std::string>>&)> callback) {
-  UNUSED(fs);
-  using STREAM_T = boost::iostreams::filtering_stream<boost::iostreams::input>;
-  std::vector<hdfs_t::fstream*> chunk_stream;
-  std::vector<STREAM_T*> fin;
+void hdfs_t::parse_csv_files(
+    const hdfs_t& fs, const std::vector<std::string>& chunks,
+    std::function<void(const std::vector<std::vector<std::string>>&)>
+        callback) {
+    UNUSED(fs);
+    using STREAM_T =
+        boost::iostreams::filtering_stream<boost::iostreams::input>;
+    std::vector<hdfs_t::fstream*> chunk_stream;
+    std::vector<STREAM_T*> fin;
 
-  for (const auto& chunk: chunks) {
-    chunk_stream.emplace_back(new hdfs_t::fstream(hdfs_t::get_hdfs(chunk), chunk));
-    fin.emplace_back(new STREAM_T());
+    for (const auto& chunk : chunks) {
+        chunk_stream.emplace_back(
+            new hdfs_t::fstream(hdfs_t::get_hdfs(chunk), chunk));
+        fin.emplace_back(new STREAM_T());
 
-    if (boost::ends_with(chunk, ".gz")) {
-      fin.back()->push(boost::iostreams::gzip_decompressor());
-    }
-    fin.back()->push(*chunk_stream.back());
-  }
-
-  #pragma omp parallel
-  {
-    std::vector<std::vector<std::string>> blocks;
-    std::string oneline;
-
-    #pragma omp for schedule(dynamic)
-    for (size_t i = 0; i < fin.size(); ++i) {
-      auto& sin = fin[i];
-      while (sin->good() && (false == sin->eof())) {
-        std::getline(*sin, oneline);
-
-        if ((false == sin->good()) || (0 == oneline.length())) {
-          continue;
+        if (boost::ends_with(chunk, ".gz")) {
+            fin.back()->push(boost::iostreams::gzip_decompressor());
         }
-
-        std::vector<std::string> splits;
-        boost::split(splits, oneline, boost::is_any_of(","));
-
-        blocks.emplace_back(std::move(splits));
-
-        if (blocks.size() > (1 << 20)) {
-          callback(blocks);
-          blocks.clear();
-        }
-      }
-      if (blocks.size()) {
-        callback(blocks);
-        blocks.clear();
-      }
+        fin.back()->push(*chunk_stream.back());
     }
-  }
 
-  for (auto&f: fin) {
-    delete f;
-  }
-  for (auto&s: chunk_stream) {
-    delete s;
-  }
-  fin.clear();
-  chunk_stream.clear();
+#pragma omp parallel
+    {
+        std::vector<std::vector<std::string>> blocks;
+        std::string oneline;
+
+#pragma omp for schedule(dynamic)
+        for (size_t i = 0; i < fin.size(); ++i) {
+            auto& sin = fin[i];
+            while (sin->good() && (false == sin->eof())) {
+                std::getline(*sin, oneline);
+
+                if ((false == sin->good()) || (0 == oneline.length())) {
+                    continue;
+                }
+
+                std::vector<std::string> splits;
+                boost::split(splits, oneline, boost::is_any_of(","));
+
+                blocks.emplace_back(std::move(splits));
+
+                if (blocks.size() > (1 << 20)) {
+                    callback(blocks);
+                    blocks.clear();
+                }
+            }
+            if (blocks.size()) {
+                callback(blocks);
+                blocks.clear();
+            }
+        }
+    }
+
+    for (auto& f : fin) {
+        delete f;
+    }
+    for (auto& s : chunk_stream) {
+        delete s;
+    }
+    fin.clear();
+    chunk_stream.clear();
 }
 
 }  // end of namespace plato
-
