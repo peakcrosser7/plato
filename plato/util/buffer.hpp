@@ -30,76 +30,80 @@
 
 namespace plato {
 
+/// @brief 侵入式缓存(只读访问原生指针)
 struct intrusive_buffer_t {
-  intrusive_buffer_t(const char* data, std::size_t size)
-    : data_(data), size_(size) { }
+    intrusive_buffer_t(const char *data, std::size_t size)
+        : data_(data), size_(size) {}
 
-  intrusive_buffer_t(const intrusive_buffer_t& o)
-    : data_(o.data_), size_(o.size_) { }
+    intrusive_buffer_t(const intrusive_buffer_t &o)
+        : data_(o.data_), size_(o.size_) {}
 
-  const char*       data_;
-  const std::size_t size_;
+    /// @brief 缓存地址
+    const char *data_;
+    /// @brief 大小
+    const std::size_t size_;
 
-protected:
-  intrusive_buffer_t();
+  protected:
+    intrusive_buffer_t();
 };
 
 /***************************************************************************/
 
 /// @brief 基于shared_ptr的缓存
 struct shared_buffer_t {
-  typedef std::shared_ptr<char> shared_array_type;
+    typedef std::shared_ptr<char> shared_array_type;
 
-  explicit shared_buffer_t(std::size_t size = 0)
-    :size_(0)
-  { resize(size); }
+    explicit shared_buffer_t(std::size_t size = 0) : size_(0) { resize(size); }
 
-  shared_buffer_t(const void* ptr, std::size_t size)
-    :size_(0)
-  { assign(ptr, size); }
-
-  shared_buffer_t(shared_array_type buf, std::size_t size)
-    :size_(size)
-  { if (size) { data_ = std::move(buf); } }
-
-  shared_buffer_t(const shared_buffer_t& buf)
-    :size_(buf.size_)
-  { if (size_) { data_ = buf.data_; } }
-
-  shared_buffer_t(shared_buffer_t&& buf)
-    :data_(std::move(buf.data_)),
-    size_(buf.size_)
-  { buf.size_ = 0; }
-
-  shared_buffer_t& operator=(const shared_buffer_t&) = default;
-  shared_buffer_t& operator=(shared_buffer_t&&) = default;
-
-  void resize(std::size_t new_size) {
-    if (new_size > size_) {
-      data_.reset(new char[new_size], &deleter);
+    shared_buffer_t(const void *ptr, std::size_t size) : size_(0) {
+        assign(ptr, size);
     }
-    size_ = new_size;
-  }
 
-  void assign(const void* ptr, std::size_t size) {
-    resize(size);
-    if (size_) {
-      std::memcpy(data_.get(), ptr, size_);
+    shared_buffer_t(shared_array_type buf, std::size_t size) : size_(size) {
+        if (size) {
+            data_ = std::move(buf);
+        }
     }
-  }
 
-  /// @brief 缓存数组
-  shared_array_type data_;
-  /// @brief 缓存大小
-  std::size_t       size_;
+    shared_buffer_t(const shared_buffer_t &buf) : size_(buf.size_) {
+        if (size_) {
+            data_ = buf.data_;
+        }
+    }
 
-protected:
-  static void deleter(char* ptr) { delete[] ptr; }
+    shared_buffer_t(shared_buffer_t &&buf)
+        : data_(std::move(buf.data_)), size_(buf.size_) {
+        buf.size_ = 0;
+    }
+
+    shared_buffer_t &operator=(const shared_buffer_t &) = default;
+    shared_buffer_t &operator=(shared_buffer_t &&) = default;
+
+    void resize(std::size_t new_size) {
+        if (new_size > size_) {
+            data_.reset(new char[new_size], &deleter);
+        }
+        size_ = new_size;
+    }
+
+    void assign(const void *ptr, std::size_t size) {
+        resize(size);
+        if (size_) {
+            std::memcpy(data_.get(), ptr, size_);
+        }
+    }
+
+    /// @brief 缓存数组
+    shared_array_type data_;
+    /// @brief 缓存大小
+    std::size_t size_;
+
+  protected:
+    static void deleter(char *ptr) { delete[] ptr; }
 };
 
 /***************************************************************************/
 
-}  // namespace plato
+} // namespace plato
 
 #endif // buffers.hpp
-

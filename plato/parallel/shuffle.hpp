@@ -67,10 +67,14 @@ using shuffle_recv_pmsg_t = typename iarchive_t<MSG, mem_istream_t>::pmsg_t;
 template <typename MSG>
 using shuffle_recv_task_t = std::function<void(int, shuffle_recv_pmsg_t<MSG>&)>;
 
+/// @brief 洗牌选项
 struct shuffle_opts_t {
+    /// @brief 发送线程数
     int send_threads_ = -1;
+    /// @brief 接收线程数
     int recv_threads_ = -1;
     int flying_send_req_per_node_ = 3;
+    /// @brief 动态(非阻塞)接收请求数
     int flying_recv_req_ = 3;
     size_t obuf_size_ = HUGESIZE;
     size_t ibuf_size_ = HUGESIZE;
@@ -111,6 +115,7 @@ inline int shuffle(shuffle_send_task_t<MSG_T> send_task,
 
     auto& cluster_info = cluster_info_t::get_instance();
 
+    // 设置发送和接收线程
     if (-1 == sf_ops.send_threads_) {
         sf_ops.send_threads_ = std::max(1, cluster_info.threads_ / 2);
     }
@@ -121,11 +126,11 @@ inline int shuffle(shuffle_send_task_t<MSG_T> send_task,
     //  recv tasks
     std::thread recv_thread([&](void) {
         volatile int finished_count = 0;
-
+// 启动多个线程接收
 #pragma omp parallel num_threads(sf_ops.recv_threads_)
         {
             const uint64_t buff_size = 2UL * 1024UL * (uint64_t)MBYTES - 1;
-
+            // 记录接收的通信请求句柄(非阻塞的动态缓存)
             std::vector<MPI_Request> requests_vec(sf_ops.flying_recv_req_,
                                                   MPI_REQUEST_NULL);
             std::vector<std::shared_ptr<char>> buffs_vec(
@@ -133,12 +138,15 @@ inline int shuffle(shuffle_send_task_t<MSG_T> send_task,
 
             // start async receive
             for (size_t r_i = 0; r_i < requests_vec.size(); ++r_i) {
+                // 映射一块进程私有的内存
                 char* buff = (char*)mmap(
                     nullptr, buff_size, PROT_READ | PROT_WRITE,
                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
                 buffs_vec[r_i].reset(buff,
                                      [](char* p) { munmap(p, buff_size); });
 
+                // `MPI_Irecv(buf,count,datatype,source,tag,comm,request)`:
+                // 非阻塞接收请求.
                 MPI_Irecv(buff, buff_size, MPI_CHAR, MPI_ANY_SOURCE,
                           MPI_ANY_TAG, MPI_COMM_WORLD, &requests_vec[r_i]);
             }

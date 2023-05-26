@@ -34,13 +34,12 @@
 
 namespace plato {
 
-/// @brief 内存输入流
+/// @brief 内存输出流
 struct mem_ostream_t {
   mem_ostream_t(const mem_ostream_t&) = delete;
 
   /**
-   * @brief
-   * @param reserved
+   * @param reserved 分配的缓存容量
    */
   mem_ostream_t(std::size_t reserved = 1024 * 20)
     : buf_(reserved),
@@ -50,9 +49,8 @@ struct mem_ostream_t {
   { }
 
   /**
-   * @brief
-   * @param ptr
-   * @param size
+   * @param ptr 内存地址
+   * @param size 内存容量
    */
   mem_ostream_t(void* ptr, std::size_t size)
     : buf_(),
@@ -76,7 +74,7 @@ struct mem_ostream_t {
   }
 
   /**
-   * @brief
+   * @brief 重置输出流
    */
   void reset(void) {
     beg_ = buf_.data_.get();
@@ -85,29 +83,33 @@ struct mem_ostream_t {
   }
 
   /**
-   * @brief getter
+   * @brief 获取输出流大小
    * @return
    */
   size_t size(void) const { return (size_t)(cur_ - beg_); }
 
   /**
-   * @brief append
+   * @brief append 写入输出流
    * @tparam T
-   * @param tptr
-   * @param size
-   * @return
+   * @param tptr 用于写入的缓存地址
+   * @param size 缓存大小
+   * @return 实际写入的字节数
    */
   template<typename T>
   std::size_t write(const T* tptr, std::size_t size) {
+    // 超出输出流内存容量
     if (cur_ + size > end_) {
       shared_buffer_t::shared_array_type prev = buf_.data_;
+      // 原输出流容量
       const std::size_t olds = static_cast<size_t>(cur_ - beg_);
+      // 新输出流容量
       const std::size_t news = static_cast<size_t>(size + (olds * 2));
 
       buf_ = shared_buffer_t(news);
       std::memcpy(buf_.data_.get(), prev.get(), olds);
 
       beg_ = buf_.data_.get();
+      // 输出流位置指针不变
       cur_ = beg_ + olds;
       end_ = beg_ + news;
     }
@@ -129,13 +131,14 @@ struct mem_ostream_t {
 #endif
       default: std::memcpy(cur_, ptr, size);
     }
+    // 移动当前位置指针
     cur_ += size;
 
     return size;
   }
 
   /**
-   * @brief ge buffer
+   * @brief 获取基于shared_ptr输出流缓存(已写入部分)
    * @return
    */
   shared_buffer_t get_buffer(void) const {  // copy a new buffer
@@ -143,7 +146,7 @@ struct mem_ostream_t {
   }
 
   /**
-   * @brief
+   * @brief 只读访问基于原生指针输出流缓存(已写入部分)
    * @return
    */
   intrusive_buffer_t get_intrusive_buffer(void) const {  // point to local buffer
@@ -151,14 +154,19 @@ struct mem_ostream_t {
   }
 
 protected:
+  /// @brief 缓存(在使用地址指针构造时不使用)
   shared_buffer_t buf_;
+  /// @brief 输出流内存起点
   char* beg_;
+  /// @brief 输出流内存当前位置指针
   char* cur_;
+  /// @brief 输出流内存终点
   char* end_;
 }; // struct mem_ostream_t
 
 /***************************************************************************/
 
+/// @brief 内存输入流
 struct mem_istream_t {
   mem_istream_t(const mem_istream_t&) = delete;
 
@@ -175,7 +183,7 @@ struct mem_istream_t {
 
   /**
    * @brief
-   * @param buf
+   * @param buf 缓存
    */
   mem_istream_t(const intrusive_buffer_t& buf)
     : beg_(buf.data_),
@@ -205,15 +213,17 @@ struct mem_istream_t {
   }
 
   /**
-   * @brief read some data
+   * @brief read some data 从输入流读取
    * @tparam T
-   * @param ptr
-   * @param size
-   * @return
+   * @param[out] ptr 读取数据的写入缓存地址
+   * @param size 缓存大小
+   * @return 实际读取的字节数
    */
   template<typename T>
   std::size_t read(T* ptr, const std::size_t size) {
+    // 可读大小
     const std::size_t avail = static_cast<size_t>(end_ - cur_);
+    // 实际复制字节数
     const std::size_t to_copy = (avail < size ? avail : size);
     switch (to_copy) {
       case 1 : std::memcpy(ptr, cur_, 1) ; break;
@@ -231,41 +241,42 @@ struct mem_istream_t {
 #endif
       default: std::memcpy(ptr, cur_, size);
     }
+    // 移动输入流位置
     cur_ += to_copy;
 
     return to_copy;
   }
 
   /**
-   * @brief getter
+   * @brief 输入流为空(读取完毕)
    * @return
    */
   bool empty() const {
     return cur_ == end_;
   }
   /**
-   * @brief getter
+   * @brief getter 返回输入流当前位置指针的字符
    * @return
    */
   char peekch() const {
     return *cur_;
   }
   /**
-   * @brief getter and forward
-   * @return
+   * @brief getter and forward 返回输入流当前位置指针的字符并前移
+   * @return 输入流当前位置的字符
    */
   char getch() {
     return *cur_++;
   }
   /**
-   * @brief
+   * @brief 回退输入流当前位置指针
    */
   void ungetch(char) {
     --cur_;
   }
 
   /**
-   * @brief
+   * @brief 获取基于shared_ptr输入流缓存(未读取部分)
    * @return
    */
   shared_buffer_t get_buffer() const {
@@ -273,7 +284,7 @@ struct mem_istream_t {
   }
 
   /**
-   * @brief
+   * @brief 只读访问基于原生指针输入流缓存(未读取部分)
    * @return
    */
   intrusive_buffer_t get_intrusive_buffer() const {
@@ -281,8 +292,11 @@ struct mem_istream_t {
   }
 
 protected:
+  /// @brief 输入流内存起点
   const char* beg_;
+  /// @brief 输入流内存当前位置指针
   const char* cur_;
+  /// @brief 输入流内存终点
   const char* end_;
 }; // struct mem_istream_t
 
