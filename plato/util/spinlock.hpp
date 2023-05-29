@@ -27,44 +27,44 @@
 
 namespace plato {
 
+/// @brief 自旋锁
 struct spinlock_t {  // pod-type
-  spinlock_t(void): lock_(0) { }
+    spinlock_t(void) : lock_(0) {}
 
-  void lock(void) {
-    while (__sync_lock_test_and_set(&lock_, 1)) while (lock_);
-  }
+    void lock(void) {
+        while (__sync_lock_test_and_set(&lock_, 1))
+            while (lock_)
+                ;
+    }
 
-  bool try_lock(void) {
-    return (1 != __sync_lock_test_and_set(&lock_, 1));
-  }
+    bool try_lock(void) { return (1 != __sync_lock_test_and_set(&lock_, 1)); }
 
-  void unlock(void) {
-    __sync_lock_release(&lock_);
-  }
+    void unlock(void) { __sync_lock_release(&lock_); }
 
-protected:
-  volatile uint32_t lock_;
+   protected:
+    volatile uint32_t lock_;
 } __attribute__((aligned(64)));
 
 struct spinlock_noaligned_t {
-  spinlock_noaligned_t(void): lock_(ATOMIC_FLAG_INIT) { }
-  spinlock_noaligned_t(const spinlock_noaligned_t&): lock_(ATOMIC_FLAG_INIT) { }
+    spinlock_noaligned_t(void) : lock_(ATOMIC_FLAG_INIT) {}
+    spinlock_noaligned_t(const spinlock_noaligned_t&)
+        : lock_(ATOMIC_FLAG_INIT) {}
 
-  void lock(void) {
-    while (std::atomic_flag_test_and_set_explicit(&lock_, std::memory_order_acquire)) {
-      __asm volatile ("pause" ::: "memory");
+    void lock(void) {
+        while (std::atomic_flag_test_and_set_explicit(
+            &lock_, std::memory_order_acquire)) {
+            __asm volatile("pause" ::: "memory");
+        }
     }
-  }
 
-  void unlock(void) {
-    std::atomic_flag_clear_explicit(&lock_, std::memory_order_release);
-  }
+    void unlock(void) {
+        std::atomic_flag_clear_explicit(&lock_, std::memory_order_release);
+    }
 
-protected:
-  std::atomic_flag lock_;
+   protected:
+    std::atomic_flag lock_;
 };
 
 }  // namespace plato
 
 #endif
-

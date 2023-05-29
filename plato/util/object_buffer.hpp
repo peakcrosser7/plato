@@ -179,8 +179,11 @@ class object_buffer_t {
     constexpr static bool is_trivial(void) { return std::is_trivial<T>::value; }
 
   protected:
+    /// @brief 容量
     size_t capacity_;
+    /// @brief 大小
     size_t size_;
+    /// @brief 对象缓存数组
     object_t *objs_;
     allocator_type allocator_;
 
@@ -295,6 +298,8 @@ size_t object_buffer_t<T, ALLOC>::push_back(const T &item) {
     return idx;
 }
 
+/// @brief 添加n个对象到缓存
+/// @return 添加前的缓存大小
 template <typename T, typename ALLOC>
 size_t object_buffer_t<T, ALLOC>::push_back(const T *item, size_t n) {
     size_t idx = __sync_fetch_and_add(&size_, n);
@@ -391,7 +396,9 @@ bool object_buffer_t<T, ALLOC>::next_chunk(Traversal &&traversal,
 }
 
 // fixed-size, object block buffer with thread-safe traversal
-template <typename T> class object_block_buffer_t {
+/// @brief 基于mmap的分块对象缓存
+template <typename T> 
+class object_block_buffer_t {
   public:
     using allocator_type = mmap_allocator_t<T>;
 
@@ -404,20 +411,20 @@ template <typename T> class object_block_buffer_t {
                           size_t block_size = HUGESIZE);
 
     /**
-     * @brief getter
+     * @brief getter 缓存的对象数
      * @return
      */
     size_t size(void) { return size_; }
 
     /**
-     * @brief getter
+     * @brief getter 得到合适的扩容分块数
      * @param need_block_num
      * @return
      */
     size_t get_appropriate_block_num(size_t need_block_num);
 
     /**
-     * @brief
+     * @brief 扩容分块
      * @param new_block_num
      */
     void expand_blocks(size_t new_block_num);
@@ -461,21 +468,27 @@ template <typename T> class object_block_buffer_t {
     bool next_chunk(Traversal &&traversal, size_t *chunk_size);
 
   private:
-    /// @brief 分块数
+    /// @brief 分块容量
     size_t block_num_;
-
+    
+    /// @brief 缓存的对象数
     size_t size_;
 
     /// @brief 分块大小
     size_t block_size_;
 
+    /// @brief 分块遍历索引
     std::atomic<size_t> traverse_i_;
 
     /// @brief 对象缓存的分块数组
     std::vector<std::shared_ptr<object_buffer_t<T, allocator_type>>> buffers_;
     
     std::mutex mutex_;
+
+    /// @brief 遍历选项
     traverse_opts_t opts_;
+
+    /// @brief 缓存所使用的分块数(分块大小)
     size_t used_block_num_;
 };
 
@@ -498,6 +511,9 @@ object_block_buffer_t<T>::object_block_buffer_t(size_t block_num,
     }
 }
 
+/// @brief 得到合适的扩容分块数
+/// @param need_block_num 需要的分块数
+/// @return 实际扩容的分块数
 template <typename T>
 size_t
 object_block_buffer_t<T>::get_appropriate_block_num(size_t need_block_num) {
@@ -508,10 +524,13 @@ object_block_buffer_t<T>::get_appropriate_block_num(size_t need_block_num) {
     return num;
 }
 
+/// @brief 扩容分块
+/// @param need_block_num 扩容后需要达到的分块数
 template <typename T>
 void object_block_buffer_t<T>::expand_blocks(size_t need_block_num) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (need_block_num > block_num_) {
+        // 只扩容差量
         size_t expand_num = need_block_num - block_num_;
         for (size_t i = 0; i < expand_num; ++i) {
             std::shared_ptr<object_buffer_t<T, allocator_type>> buffer_ptr(
@@ -526,6 +545,7 @@ template <typename T>
 size_t object_block_buffer_t<T>::push_back(const T &item) {
     size_t idx = __sync_fetch_and_add(&size_, (size_t)1);
     size_t need_block_num = (idx + 1 + block_size_ - 1) / block_size_;
+    // 扩容
     if (need_block_num > block_num_) {
         expand_blocks(get_appropriate_block_num(need_block_num));
     }
@@ -568,6 +588,8 @@ const T &object_block_buffer_t<T>::operator[](size_t i) const {
     return (*(buffers_[i / block_size_]))[i % block_size_];
 }
 
+/// @brief 重新开始遍历分块
+/// @param opts 遍历选项 
 template <typename T>
 void object_block_buffer_t<T>::reset_traversal(const traverse_opts_t &opts) {
     opts_ = opts;
@@ -575,10 +597,15 @@ void object_block_buffer_t<T>::reset_traversal(const traverse_opts_t &opts) {
     used_block_num_ = (size_ + block_size_ - 1) / block_size_;
 }
 
+/// @brief 遍历一些分块并对分块中的每个对象执行操作
+/// @param traversal 遍历操作(函数,伪函数)
+/// @param[in,out] chunk_size 遍历的分块数
+/// @return 执行成功
 template <typename T>
 template <typename Traversal>
 bool object_block_buffer_t<T>::next_chunk(Traversal &&traversal,
                                           size_t *chunk_size) {
+    // 根据可用线程数确定实际遍历的分块数
     size_t max_chunk_size = used_block_num_ / omp_get_num_threads() + 1;
     if (max_chunk_size < *chunk_size)
         *chunk_size = max_chunk_size;
@@ -586,6 +613,7 @@ bool object_block_buffer_t<T>::next_chunk(Traversal &&traversal,
         traverse_i_.fetch_add(*chunk_size, std::memory_order_relaxed);
     if (range_start >= used_block_num_)
         return false;
+    // 根据使用的分块数调整遍历的分块数
     if (range_start + *chunk_size >= used_block_num_) {
         *chunk_size = used_block_num_ - range_start;
     }
@@ -596,6 +624,7 @@ bool object_block_buffer_t<T>::next_chunk(Traversal &&traversal,
         if (block_size == 0)
             continue;
         T *ptr = &((*buffers_[i])[0]);
+        // 遍历分块中的每个对象
         for (size_t j = 0; j < block_size; ++j) {
             traversal(j, ptr + j);
         }

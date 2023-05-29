@@ -83,6 +83,9 @@ inline int assign_files_even_by_size(
     return 0;
 }
 
+/// @brief 基于Linux文件系统获取本节点需要处理的文件分块列表
+/// @param path 文件路径
+/// @return 本节点需要处理的文件分块列表
 inline std::vector<std::string> get_files_from_posix(const std::string& path) {
     namespace fs = boost::filesystem;
 
@@ -92,7 +95,7 @@ inline std::vector<std::string> get_files_from_posix(const std::string& path) {
     std::vector<std::vector<std::string>> fchunks;
 
     if (0 == cluster_info.partition_id_) {  // split files evenly
-        std::vector<std::pair<std::string, size_t>> files;
+        std::vector<std::pair<std::string, size_t>> files;  // 文件列表
 
         if (fs::is_directory(path)) {  // check path is a file or a directory
             for (fs::directory_iterator it(path);
@@ -103,7 +106,7 @@ inline std::vector<std::string> get_files_from_posix(const std::string& path) {
         } else {
             files.emplace_back(std::make_pair(path, fs::file_size(path)));
         }
-
+        // 文件按节点分块
         if ((rc = assign_files_even_by_size(&fchunks, files,
                                             cluster_info.partitions_)) < 0) {
             LOG(ERROR) << "assign_files_even_by_size failed with code: " << rc;
@@ -146,11 +149,15 @@ inline std::vector<std::string> get_files_from_posix(const std::string& path) {
     return chunks;
 }
 
+/// @brief 基于HDFS获取本节点需要处理的文件分块列表
+/// @param path HDFS文件路径
+/// @return 本节点需要处理的文件分块列表
 inline std::vector<std::string> get_files_from_hdfs(const std::string& path) {
     int rc = 0;
     auto& cluster_info = cluster_info_t::get_instance();
+    // 接收到的数据本节点的文件分块列表
     std::vector<std::string> chunks;
-    // 每个集群节点对于的文件列表
+    // 每个集群节点对于的文件分块列表
     std::vector<std::vector<std::string>> fchunks;
 
     if (0 == cluster_info.partition_id_) {
@@ -185,8 +192,10 @@ inline std::vector<std::string> get_files_from_hdfs(const std::string& path) {
 
     // assign file chunks
     std::atomic<uint32_t> s_index(0);
+    // 洗牌的发送任务
     auto shuffle_send =
         [&](shuffle_send_callback_t<std::vector<std::string>> send) {
+            // 0 号进程发送每个节点对应的文件列表
             if (0 == cluster_info.partition_id_) {
                 for (uint32_t s_i = s_index.fetch_add(1); s_i < fchunks.size();
                      s_i = s_index.fetch_add(1)) {
@@ -195,12 +204,12 @@ inline std::vector<std::string> get_files_from_hdfs(const std::string& path) {
             }
         };
 
-    auto shuffle_recv =
-        [&](int /*p_i*/,
+    auto shuffle_recv = [&](int /*p_i*/,
             plato::shuffle_recv_pmsg_t<std::vector<std::string>>& pmsg) {
             chunks = *pmsg;
         };
 
+    // 洗牌,即发送至每个节点对应的文件列表并接收
     if (0 !=
         (rc = shuffle<std::vector<std::string>>(shuffle_send, shuffle_recv))) {
         LOG(ERROR) << "shuffle failed with code: " << rc;
@@ -211,6 +220,8 @@ inline std::vector<std::string> get_files_from_hdfs(const std::string& path) {
     return chunks;
 }
 
+/// @brief 获取本节点需要处理的文件分块列表
+/// @param path 文件路径
 inline std::vector<std::string> get_files(const std::string& path) {
     CHECK(!path.empty()) << "invalid path: " << path;
 
@@ -225,9 +236,9 @@ inline std::vector<std::string> get_files(const std::string& path) {
 }
 
 /*
- *
- * \param filename
- * \param func      auto func(boost::iostreams::filtering_istream& is)
+ * 处理文件
+ * \param filename 文件名
+ * \param func   auto func(boost::iostreams::filtering_istream& is) 处理文件的回调函数
  *
  * \return 0 -- success, else failed
  **/

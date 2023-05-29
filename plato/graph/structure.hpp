@@ -113,6 +113,7 @@ void read_from_files(const std::string &path, edge_format_t format,
             (boost::format("unknown format: %lu") % (uint64_t)format).str());
     }
 
+    // 本节点需要处理的文件分块列表
     std::vector<std::string> files = get_files(path);
     std::mutex files_lock;
 
@@ -129,6 +130,7 @@ void read_from_files(const std::string &path, edge_format_t format,
             }
 
             with_file(filename, [&](boost::iostreams::filtering_istream &is) {
+                // CSV文件解析
                 parser(is, callback, decoder);
             });
         }
@@ -157,10 +159,11 @@ void load_edges_cache_with_encoder(
     const std::string &path, edge_format_t format, decoder_t<EDATA> decoder,
     data_callback_t<EDATA, vid_t> callback,
     vencoder_t<EDATA, VID_T, CACHE> vid_encoder = nullptr) {
-
+    // 边的缓存
     std::shared_ptr<CACHE<EDATA, VID_T>> pcache(new CACHE<EDATA, VID_T>());
 
     // we count every statistics first, do not optimized early
+    // 将边添加至缓存
     auto read_callback = [&](edge_unit_t<EDATA, VID_T> *input, size_t size) {
         pcache->push_back(input, size);
         return true;
@@ -195,11 +198,12 @@ load_edges_cache(graph_info_t *pginfo, const std::string &path,
                  edge_format_t format, decoder_t<EDATA> decoder,
                  data_callback_t<EDATA, vid_t> callback = nullptr,
                  vencoder_t<EDATA, VID_T, CACHE> vid_encoder = nullptr) {
-
+    // 边数
     eid_t edges = 0;
     // 结点位图
     bitmap_t<> v_bitmap(std::numeric_limits<vid_t>::max());
     std::shared_ptr<CACHE<EDATA, vid_t>> cache(new CACHE<EDATA, vid_t>());
+    // 读取文件的回调函数
     auto real_callback = [&](edge_unit_t<EDATA, vid_t> *input, size_t size) {
         // `__sync_fetch_and_add(*ptr, value)`:GCC原子加,*ptr+=value
         __sync_fetch_and_add(&edges, size);
