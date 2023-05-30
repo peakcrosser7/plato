@@ -311,7 +311,7 @@ enum class traverse_mode_t {
 /// @brief 遍历选项
 struct traverse_opts_t {
     traverse_mode_t mode_ = traverse_mode_t::ORIGIN;
-    /// @brief 自动释放
+    /// @brief 是否自动释放
     bool auto_release_ = false;
 };
 

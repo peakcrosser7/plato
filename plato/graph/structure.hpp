@@ -163,13 +163,14 @@ void load_edges_cache_with_encoder(
     std::shared_ptr<CACHE<EDATA, VID_T>> pcache(new CACHE<EDATA, VID_T>());
 
     // we count every statistics first, do not optimized early
-    // 将边添加至缓存
+    // 读取边时的回调函数 将边添加至缓存
     auto read_callback = [&](edge_unit_t<EDATA, VID_T> *input, size_t size) {
         pcache->push_back(input, size);
         return true;
     };
 
     read_from_files<EDATA, VID_T>(path, format, decoder, read_callback);
+    // 对结点进行编码
     vid_encoder->encode(*pcache, callback);
 }
 
@@ -202,6 +203,7 @@ load_edges_cache(graph_info_t *pginfo, const std::string &path,
     eid_t edges = 0;
     // 结点位图
     bitmap_t<> v_bitmap(std::numeric_limits<vid_t>::max());
+    // 边缓存
     std::shared_ptr<CACHE<EDATA, vid_t>> cache(new CACHE<EDATA, vid_t>());
     // 读取文件的回调函数
     auto real_callback = [&](edge_unit_t<EDATA, vid_t> *input, size_t size) {
@@ -227,6 +229,7 @@ load_edges_cache(graph_info_t *pginfo, const std::string &path,
                        << (uint64_t)format;
             return nullptr;
         }
+        // 读取边
         read_from_files<EDATA, vid_t>(path, format, decoder, real_callback);
     }
 

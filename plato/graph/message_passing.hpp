@@ -151,11 +151,14 @@ R aggregate_message(
 // *******************************************************************************
 // // spread message
 
+/// @brief 消息传递回调函数 (发送节点,消息)->void
+/// @tparam MSG 
 template <typename MSG>
 using mepa_sd_send_callback_t = std::function<void(int, const MSG &)>;
 
 /// @brief 消息传递发送上下文
 template <typename MSG> struct mepa_sd_context_t {
+    /// @brief 发送函数
     mepa_sd_send_callback_t<MSG> send;
 };
 
@@ -217,10 +220,16 @@ R spread_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
         bsp_opts.threads_ = cluster_info.threads_;
     }
 
+    // 每个线程的归约器列表
     std::vector<R> reducer_vec(bsp_opts.threads_, R());
     thread_local R *preducer;
-
+    
+    /// @brief fine_grain_bsp()函数每次BSP发送执行的函数
+    /// @param send BSP执行的回调函数
     auto bsp_send = [&](bsp_send_callback_t<MSG> send) {
+        /// @brief actives.next_chunk()中遍历每个元素时调用的函数
+        /// @param node 发送到的节点
+        /// @param message 发送的消息
         auto send_callback = [&](int node, const MSG &message) {
             send(node, message);
         };
@@ -236,7 +245,10 @@ R spread_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
         }
     };
 
+    /// @brief fine_grain_bsp()函数每次BSP接收执行的函数
+    /// @param pmsg 接收到的消息
     auto bsp_recv = [&](int /* p_i */, bsp_recv_pmsg_t<MSG> &pmsg) {
+        // 对接收的消息进行处理
         *preducer += sink_task(*pmsg);
     };
 
@@ -244,16 +256,19 @@ R spread_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
     actives.reset_traversal();
 
     int rc = fine_grain_bsp<MSG>(bsp_send, bsp_recv, bsp_opts, [&](void) {
+        // 定义为当前线程位置的归约器元素
         preducer = &reducer_vec[omp_get_thread_num()];
     });
     CHECK(0 == rc);
 
     R reducer = R();
+    // 对每个线程的结果进行归约
 #pragma omp parallel for reduction(+ : reducer)
     for (size_t i = 0; i < reducer_vec.size(); ++i) {
         reducer += reducer_vec[i];
     }
 
+    // MPI进程间归约
     R global_reducer;
     MPI_Allreduce(&reducer, &global_reducer, 1, get_mpi_data_type<R>(), MPI_SUM,
                   MPI_COMM_WORLD);

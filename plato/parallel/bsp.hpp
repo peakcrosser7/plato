@@ -72,7 +72,8 @@ struct bsp_opts_t {
     uint32_t global_size_ = 16 * MBYTES;
     /// @brief 每个节点的消息缓存数 message count
     uint32_t local_capacity_ = 4 * PAGESIZE;
-    uint32_t batch_size_ = 1;  // batch process #batch_size_ messages
+    /// @brief 一次处理接收消息的批次大小 batch process #batch_size_ messages
+    uint32_t batch_size_ = 1;
     MPI_Comm comm_ = MPI_COMM_WORLD;
 };
 
@@ -578,7 +579,8 @@ int fine_grain_bsp(
     if (opts.flying_recv_ <= 0) {
         opts.flying_recv_ = cluster_info.partitions_;
     }
-
+    
+    // 是否继续处理接收的消息
     std::atomic<bool> process_continue(true);
     // pin all these to numa node ??
     // 接收的分块数据队列
@@ -598,6 +600,7 @@ int fine_grain_bsp(
         chunk_left[r_i].store(0);
     }
 
+    // 接收辅助线程
     std::thread recv_assist_thread([&](void) {
         // 完成接收的节点数
         std::atomic<int> finished_count(0);
@@ -637,7 +640,7 @@ int fine_grain_bsp(
                                  *)(&buff[recv_bytes - sizeof(chunk_tail_t)]);
                         CHECK(tail->size_ >= sizeof(chunk_tail_t));
                         char *data = &buff[recv_bytes] - tail->size_;
-
+                        // 记录该索引剩余处理的分块数
                         ++chunk_left[index];
                         chunk_queue.enqueue(chunk_desc_t{
                             data, tail->size_ - (uint32_t)sizeof(chunk_tail_t),
@@ -647,13 +650,14 @@ int fine_grain_bsp(
                     CHECK(0 == recv_bytes);
                 }
                 requests_vec[index] = MPI_REQUEST_NULL;
+                // 标记对应索引正在处理
                 processing[index] = true;
 
                 has_message = true;
                 if (false == continued) {
                     break;
                 }
-                // 继续检查接收请求
+                // 继续检查接收请求的完成
                 MPI_Testany(requests_vec.size(), requests_vec.data(), &index,
                             &flag, &status);
             }
@@ -661,12 +665,15 @@ int fine_grain_bsp(
             return has_message;
         };
 
+        // 重启接收请求的函数,返回是否找到已处理完的请求
         auto restart_once = [&](void) {
-            bool found = false;
+            bool found = false; // 是否找到
             for (size_t i = 0; i < processing.size(); ++i) {
+                // 正在处理该请求的分块且剩余分块为0,表明已全部处理完
                 if (processing[i] && (0 == chunk_left[i].load())) {
                     found = true;
                     processing[i] = false;
+                    // 继续非阻塞接收请求
                     MPI_Irecv(buffs_vec[i].get(), buff_size, MPI_CHAR,
                               MPI_ANY_SOURCE, MPI_ANY_TAG, opts.comm_,
                               &requests_vec[i]);
@@ -710,6 +717,7 @@ int fine_grain_bsp(
             }
         } while (busy);
 
+        // 关闭接收请求句柄
         for (size_t r_i = 0; r_i < requests_vec.size(); ++r_i) {
             if (MPI_REQUEST_NULL != requests_vec[r_i]) {
                 MPI_Cancel(&requests_vec[r_i]);
@@ -750,23 +758,26 @@ int fine_grain_bsp(
                 }
             };
 
-            // 请求完成试探函数
+            // 请求完成试探函数,返回是否有消息被出队
             auto probe_once = [&](uint32_t batch_size) {
                 bool has_message = false;
                 chunk_desc_t chunk;
 
-                uint32_t processed = 0;
+                uint32_t processed = 0; // 处理的分块数
                 while (chunk_queue.try_dequeue(chunk)) {    // 如果出队了分块
                     iarchive_spec_t iarchive(chunk.data_, chunk.size_,
                                              chunk.count_);
-                    // 反序列化消息
+                    // 反序列化分块中的消息
                     for (auto msg = iarchive.absorb(); nullptr != msg;
                          msg = iarchive.absorb()) {
+                        // 对每个消息执行接收任务函数
                         recv_task(chunk.from_, msg);
                     }
+                    // 处理了一个分块
                     --chunk_left[chunk.index_];
 
                     has_message = true;
+                    // 处理的分块达到批次
                     if (++processed >= batch_size) {
                         break;
                     }
