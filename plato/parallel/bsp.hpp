@@ -72,7 +72,7 @@ struct bsp_opts_t {
     uint32_t global_size_ = 16 * MBYTES;
     /// @brief 每个节点的消息缓存数 message count
     uint32_t local_capacity_ = 4 * PAGESIZE;
-    /// @brief 一次处理接收消息的批次大小 batch process #batch_size_ messages
+    /// @brief 对接收消息进行一次处理的批次大小 batch process #batch_size_ messages
     uint32_t batch_size_ = 1;
     MPI_Comm comm_ = MPI_COMM_WORLD;
 };

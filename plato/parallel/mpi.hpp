@@ -103,16 +103,25 @@ int bcast(void *buffer, size_t count, MPI_Datatype datatype, int root,
     return MPI_SUCCESS;
 }
 
+/// @brief 对数据进行归约,类MPI_Allreduce,可处理超MPI消息上限的数据 
+/// @param send_buf 发送缓存
+/// @param recv_buf 接受缓存
+/// @param count 发送数目
+/// @param datatype 数据类型
+/// @param op 归约操作
+/// @param comm MPI通信器
+/// @return MPI错误类型
 int allreduce(const void *send_buf, void *recv_buf, size_t count,
               MPI_Datatype datatype, MPI_Op op, MPI_Comm comm) {
     // mpi_allreduce will fail when message size is too large
-    int type_size;
+    int type_size;  // 数据类型的字节数
     MPI_Type_size(datatype, &type_size);
     size_t message_size = count * (size_t)type_size;
-    if (message_size >= MPI_MSG_MAX_SIZE) {
+    if (message_size >= MPI_MSG_MAX_SIZE) {     // 超过MPI消息的大小上下
         size_t max_count = MPI_MSG_MAX_SIZE / type_size;
+        // 分成多次归约
         for (size_t i = 0; i < count; i += max_count) {
-            size_t actual_count = max_count;
+            size_t actual_count = max_count;    // 本次归约的消息数
             if (i + actual_count > count) {
                 actual_count = count - i;
             }

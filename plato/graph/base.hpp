@@ -99,6 +99,7 @@ struct edge_unit_t {
     }
 };  // __attribute__((packed));
 
+/// @brief 边类型(无边数据特化)
 template <typename VID_T>
 struct edge_unit_t<empty_t, VID_T> {
     VID_T src_;
@@ -108,14 +109,18 @@ struct edge_unit_t<empty_t, VID_T> {
     };
 };  // __attribute__((packed));
 
+/// @brief 邻接表元素类型
+/// @tparam EDATA_T 边数据类型
 template <typename EDATA_T>
 struct adj_unit_t {
+    /// @brief (边的源/终)邻结点ID
     vid_t neighbour_;
+    /// @brief 边数据
     EDATA_T edata_;
 
     template <typename Ar>
-    void serialize(
-        Ar& ar) {  // boost-style serialization when EDATA_T is non-trivial
+    void serialize(Ar& ar) {  
+        // boost-style serialization when EDATA_T is non-trivial
         ar& neighbour_& edata_;
     }
 };  // __attribute__((packed));
@@ -275,7 +280,7 @@ using graph_info_mask_t = uint64_t;
 #define GRAPH_INFO_EDGES (1UL << 1UL)
 #define GRAPH_INFO_OUT_DEGREE (1UL << 2UL)
 
-/// @brief 图信息
+/// @brief 数据图信息
 struct graph_info_t {
     // input params
 
@@ -283,10 +288,13 @@ struct graph_info_t {
     bool is_directed_;
 
     // output params
+
+    /// @brief 总结点数
     vid_t vertices_;
+    /// @brief 总边数
     eid_t edges_;
-    /// @brief 最大结点ID
-    vid_t max_v_i_;  // maximum vertex's id
+    /// @brief 最大结点ID maximum vertex's id
+    vid_t max_v_i_;
 
     graph_info_t(void)
         : is_directed_(false), vertices_(0), edges_(0), max_v_i_(0) {}
@@ -301,8 +309,11 @@ struct graph_info_t {
 // *******************************************************************************
 // // traverse options
 
+/// @brief 遍历模式
 enum class traverse_mode_t {
-    ORIGIN = 1,  // let structure decide
+    /// @brief 由遍历的结构决定 let structure decide
+    ORIGIN = 1,
+    /// @brief 
     RANDOM = 2,
     CIRCLE = 3
 };
@@ -310,6 +321,7 @@ enum class traverse_mode_t {
 // traverse related
 /// @brief 遍历选项
 struct traverse_opts_t {
+    /// @brief 遍历模式
     traverse_mode_t mode_ = traverse_mode_t::ORIGIN;
     /// @brief 是否自动释放
     bool auto_release_ = false;

@@ -199,9 +199,9 @@ load_edges_cache(graph_info_t *pginfo, const std::string &path,
                  edge_format_t format, decoder_t<EDATA> decoder,
                  data_callback_t<EDATA, vid_t> callback = nullptr,
                  vencoder_t<EDATA, VID_T, CACHE> vid_encoder = nullptr) {
-    // 边数
+    // 数据图总边数
     eid_t edges = 0;
-    // 结点位图
+    // 数据图全局结点位图(有该结点则对应位为1)
     bitmap_t<> v_bitmap(std::numeric_limits<vid_t>::max());
     // 边缓存
     std::shared_ptr<CACHE<EDATA, vid_t>> cache(new CACHE<EDATA, vid_t>());
@@ -220,6 +220,7 @@ load_edges_cache(graph_info_t *pginfo, const std::string &path,
     };
 
     if (nullptr != vid_encoder) {
+        // 带有结点编码的加载边数据
         load_edges_cache_with_encoder<EDATA, VID_T, CACHE>(
             path, format, decoder, real_callback, vid_encoder);
     } else {
@@ -232,12 +233,14 @@ load_edges_cache(graph_info_t *pginfo, const std::string &path,
         // 读取边
         read_from_files<EDATA, vid_t>(path, format, decoder, real_callback);
     }
-
+    // 归约所有节点的边数
     MPI_Allreduce(MPI_IN_PLACE, &edges, 1, get_mpi_data_type<eid_t>(), MPI_SUM,
                   MPI_COMM_WORLD);
+    // 或操作归约得到全局的结点位图
     allreduce(MPI_IN_PLACE, v_bitmap.data_, word_offset(v_bitmap.size_) + 1,
               get_mpi_data_type<uint64_t>(), MPI_BOR, MPI_COMM_WORLD);
 
+    // 设置数据图信息
     if (pginfo) {
         pginfo->edges_ = edges;
         pginfo->vertices_ = v_bitmap.count();
@@ -247,14 +250,19 @@ load_edges_cache(graph_info_t *pginfo, const std::string &path,
     return cache;
 }
 
+/// @brief 获取全局结点出度
+/// @param graph_info 图信息
+/// @param cache 边缓存
+/// @return 结点出度数组
 template <typename T, typename EDGE_CACHE>
 std::vector<T> generate_dense_out_degrees(const graph_info_t &graph_info,
                                           EDGE_CACHE &cache) {
     using edge_unit_spec_t = typename EDGE_CACHE::edge_unit_spec_t;
-
+    // 全局结点出度
     std::vector<T> degrees(graph_info.max_v_i_ + 1, 0);
 
     cache.reset_traversal();
+    // 计算结点出度
 #pragma omp parallel
     {
         auto traversal = [&](size_t /*idx*/, edge_unit_spec_t *edge) {
@@ -269,19 +277,25 @@ std::vector<T> generate_dense_out_degrees(const graph_info_t &graph_info,
         while (cache.next_chunk(traversal, &chunk_size)) {
         }
     }
+    // 获取其他节点的结点度数得到全局结点度数
     allreduce(MPI_IN_PLACE, degrees.data(), graph_info.max_v_i_ + 1,
               get_mpi_data_type<T>(), MPI_SUM, MPI_COMM_WORLD);
 
     return degrees;
 }
 
+/// @brief 获取全局结点入度
+/// @param graph_info 图信息
+/// @param cache 边缓存
+/// @return 结点入度数组
 template <typename T, typename EDGE_CACHE>
 std::vector<T> generate_dense_in_degrees(const graph_info_t &graph_info,
                                          EDGE_CACHE &cache) {
     using edge_unit_spec_t = typename EDGE_CACHE::edge_unit_spec_t;
 
+    // 每个结点的入度
     std::vector<T> degrees(graph_info.max_v_i_ + 1, 0);
-
+    // 遍历边缓存并统计结点入度
     cache.reset_traversal();
 #pragma omp parallel
     {
@@ -297,6 +311,7 @@ std::vector<T> generate_dense_in_degrees(const graph_info_t &graph_info,
         while (cache.next_chunk(traversal, &chunk_size)) {
         }
     }
+    // 获取其他节点的结点度数得到全局结点度数
     allreduce(MPI_IN_PLACE, degrees.data(), graph_info.max_v_i_ + 1,
               get_mpi_data_type<T>(), MPI_SUM, MPI_COMM_WORLD);
 
@@ -1050,6 +1065,7 @@ create_dualmode_seq_from_path(
     watch.mark("t0");
     watch.mark("t1");
 
+    // 从文件中加载数据图边缓存
     auto cache = load_edges_cache<EDATA, VID_T, CACHE>(
         pgraph_info, path, format, decoder, nullptr, vid_encoder);
 
@@ -1068,10 +1084,10 @@ create_dualmode_seq_from_path(
     std::shared_ptr<plato::sequence_balanced_by_destination_t> part_bcsr =
         nullptr;
     {
-        std::vector<vid_t> degrees;
-        if (use_in_degree) {
+        std::vector<vid_t> degrees; // 结点入度或出度数组
+        if (use_in_degree) {    // 使用入度进行图划分
             degrees = generate_dense_in_degrees<vid_t>(*pgraph_info, *cache);
-        } else {
+        } else {    // 使用出度进行图划分
             degrees = generate_dense_out_degrees<vid_t>(*pgraph_info, *cache);
         }
 
@@ -1082,6 +1098,7 @@ create_dualmode_seq_from_path(
         watch.mark("t1");
 
         plato::eid_t __edges = pgraph_info->edges_;
+        // 无向图边数乘2
         if (false == pgraph_info->is_directed_) {
             __edges = __edges * 2;
         }
@@ -1097,6 +1114,7 @@ create_dualmode_seq_from_path(
     watch.mark("t1");
 
     bcsr_spec_t bcsr(part_bcsr);
+    // 加载边信息到位图CSR
     CHECK(0 == bcsr.load_from_cache(*pgraph_info, *cache));
 
     if (0 == cluster_info.partition_id_) {

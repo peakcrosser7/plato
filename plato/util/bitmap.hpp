@@ -185,6 +185,7 @@ void bitmap_t<ALLOC>::fill(void) {
   }
 }
 
+/// @brief 返回最高有效位(比特位为1的最高位)
 template <typename ALLOC>
 size_t bitmap_t<ALLOC>::msb(void) const {
   size_t i = word_offset(size_);
@@ -233,12 +234,14 @@ void bitmap_t<ALLOC>::clr_bit(size_t i) {
   __sync_fetch_and_and(data_ + word_offset(i), ~(1ul << bits_offset(i)));
 }
 
+/// @brief 有效(比特位为1)个数
 template <typename ALLOC>
 size_t bitmap_t<ALLOC>::count(void) const {
   size_t cnt = 0;
   size_t bm_size = word_offset(size_);
   #pragma omp parallel for reduction(+:cnt)
   for (size_t i = 0; i <= bm_size; ++i) {
+    // 返回比特位为1的个数
     cnt += __builtin_popcountl(data_[i]);
   }
   return cnt;
