@@ -138,9 +138,12 @@ struct adj_unit_t<empty_t> {
     }
 };  // __attribute__((packed));
 
+/// @brief 结点邻接表
 template <typename EDATA_T>
 struct adj_unit_list_t {
+    /// @brief 起点
     adj_unit_t<EDATA_T>* begin_;
+    /// @brief 终点
     adj_unit_t<EDATA_T>* end_;
 
     adj_unit_list_t(void) : begin_(nullptr), end_(nullptr) {}
@@ -311,9 +314,9 @@ struct graph_info_t {
 
 /// @brief 遍历模式
 enum class traverse_mode_t {
-    /// @brief 由遍历的结构决定 let structure decide
+    /// @brief 默认遍历模式 let structure decide
     ORIGIN = 1,
-    /// @brief 
+    /// @brief 随机遍历模式
     RANDOM = 2,
     CIRCLE = 3
 };

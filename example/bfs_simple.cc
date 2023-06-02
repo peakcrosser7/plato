@@ -66,6 +66,7 @@ int main(int argc, char **argv) {
     cluster_info.initialize(&argc, &argv);
 
     plato::graph_info_t graph_info(FLAGS_is_directed);
+    // 根据文件路径构建双模式(BCSR和DCSC)的图结构
     auto graph = plato::create_dualmode_seq_from_path<plato::empty_t>(
         &graph_info, FLAGS_input, plato::edge_format_t::CSV,
         plato::dummy_decoder<plato::empty_t>, FLAGS_alpha, FLAGS_part_by_in);

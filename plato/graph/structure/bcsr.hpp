@@ -175,16 +175,16 @@ class bcsr_t {
 
     /// @brief 数据图结点总数
     vid_t vertices_;
-    /// @brief 本地节点数据子图边数
+    /// @brief 节点本地数据子图边数
     eid_t edges_;
 
     /// @brief 结点划分序列
     std::shared_ptr<PART_IMPL> partitioner_;
     /// @brief 节点本地有效结点的位图
     std::shared_ptr<bitmap_spec_t> bitmap_;
-    /// @brief 节点本地数据图邻接表边数组
+    /// @brief 节点本地数据图邻接表边数组(CSR列索引)
     std::shared_ptr<adj_unit_spec_t> adjs_;
-    /// @brief 节点本地数据图邻接表结点索引数组
+    /// @brief 节点本地数据图邻接表结点索引数组(CSR行偏移)
     std::shared_ptr<eid_t> index_;
 
     /// @brief 内存分配器
@@ -193,18 +193,26 @@ class bcsr_t {
     // traverse related
    
     // do not basic_chunk too big, try to keep parallel edges access within L3 cache
+    /// @brief 基本分块大小
     static const vid_t basic_chunk = 64;  
     /// @brief 遍历索引
     std::atomic<vid_t> traverse_i_;
+    /// @brief 遍历范围数组(每个元素对应一部分结点的起点和终点ID)
     std::vector<std::pair<vid_t, vid_t>> traverse_range_;
+    /// @brief 遍历选项
     traverse_opts_t traverse_opts_;
 
     // SFINAE only works for deduced template arguments, it's tricky here
+
+    /// @brief 获取子图的起点(序列分区实现)
+    /// @tparam PART 子图分区类型
     template <typename PART>
     typename std::enable_if<is_seq_part<PART>(), vid_t>::type partition_start(
         int p_i) {
         return partitioner_->offset_[p_i];
     }
+    /// @brief 获取子图的终点(序列分区实现)
+    /// @tparam PART 子图分区类型
     template <typename PART>
     typename std::enable_if<is_seq_part<PART>(), vid_t>::type partition_end(
         int p_i) {
@@ -212,12 +220,17 @@ class bcsr_t {
     }
 
     // SFINAE only works for deduced template arguments, it's tricky here
+
+    /// @brief 获取子图的起点(非序列分区实现报错)
+    /// @tparam PART 子图分区类型
     template <typename PART>
     typename std::enable_if<!is_seq_part<PART>(), vid_t>::type partition_start(
         int) {
         CHECK(false);
         return -1;
     }
+    /// @brief 获取子图的终点(非序列分区实现报错)
+    /// @tparam PART 子图分区类型
     template <typename PART>
     typename std::enable_if<!is_seq_part<PART>(), vid_t>::type partition_end(
         int) {
@@ -276,7 +289,7 @@ bcsr_t<EDATA, PART_IMPL, ALLOC>::neighbours(vid_t v_i) {
     return neis;
 }
 
-/// @brief 遍历边缓存加载边信息(辅助函数)
+/// @brief 遍历加载边信息(辅助函数)
 /// @param vertices 结点数
 /// @param reset_traversal 重置遍历的函数 bool:auto_release_是否自动释放
 /// @param foreach_srcs 遍历边缓存操作源结点的函数 bsp_send_callback_t<vid_t>:向节点发送消息的回调函数
@@ -572,32 +585,40 @@ int bcsr_t<EDATA, PART_IMPL, ALLOC>::load_from_graph(
                                foreach_srcs, foreach_edges);
 }
 
+/// @brief 重置遍历索引及遍历数组
+/// @param opts 遍历选项
 template <typename EDATA, typename PART_IMPL, typename ALLOC>
 void bcsr_t<EDATA, PART_IMPL, ALLOC>::reset_traversal(
     const traverse_opts_t& opts) {
     traverse_i_.store(0, std::memory_order_release);
 
+    // 遍历选项不变且遍历范围数组不为空时返回,使用先前缓存的范围
     if ((traverse_opts_.mode_ == opts.mode_) && traverse_range_.size()) {
         return;  // use cached range
     }
     traverse_opts_ = opts;
 
+    // 构建默认的遍历数组
     auto build_ranges_origin = [&](void) {
+        // 分块数
         size_t buckets =
             std::min((size_t)(MBYTES), (size_t)vertices_ / basic_chunk + 1);
 
         traverse_range_.resize(buckets);
+        // 剩余结点数
         vid_t remained_vertices = vertices_;
         vid_t v_start = 0;
-
+        // 分配结点到桶中
         for (size_t i = 0; i < buckets; ++i) {
             if ((buckets - 1) == i) {
+                // 最后一个桶将剩余结点都放入
                 traverse_range_[i].first = v_start;
                 traverse_range_[i].second = vertices_;
             } else {
+                // 将剩余结点按剩余桶平分并分块对齐
                 size_t amount = remained_vertices / (buckets - i) /
                                 basic_chunk * basic_chunk;
-
+                // 设置分块的起点终点结点序号
                 traverse_range_[i].first = v_start;
                 traverse_range_[i].second = v_start + amount;
             }
@@ -609,19 +630,21 @@ void bcsr_t<EDATA, PART_IMPL, ALLOC>::reset_traversal(
         CHECK(0 == remained_vertices);
     };
 
+    // 根据遍历模式设置遍历范围数组
     switch (traverse_opts_.mode_) {
         case traverse_mode_t::ORIGIN:
             build_ranges_origin();
             break;
         case traverse_mode_t::RANDOM:
             build_ranges_origin();
+            // 打乱范围数组
             std::random_shuffle(traverse_range_.begin(), traverse_range_.end());
             break;
         case traverse_mode_t::CIRCLE: {
             auto& cluster_info = cluster_info_t::get_instance();
             traverse_range_.clear();
 
-            if (is_seq_part<partition_t>()) {
+            if (is_seq_part<partition_t>()) {   // 只支持序列类型
                 int p_i =
                     (cluster_info.partition_id_ + 1) % cluster_info.partitions_;
 
@@ -650,6 +673,10 @@ void bcsr_t<EDATA, PART_IMPL, ALLOC>::reset_traversal(
     }
 }
 
+/// @brief 处理一分块的边并对分块中的每条边执行操作(线程安全)
+/// @param traversal 遍历操作(函数,伪函数)
+/// @param[in,out] chunk_size 分块大小 
+/// @return 是否有边被遍历
 template <typename EDATA, typename PART_IMPL, typename ALLOC>
 bool bcsr_t<EDATA, PART_IMPL, ALLOC>::next_chunk(traversal_t traversal,
                                                  size_t* chunk_size) {
@@ -659,16 +686,19 @@ bool bcsr_t<EDATA, PART_IMPL, ALLOC>::next_chunk(traversal_t traversal,
     if (range_start >= traverse_range_.size()) {
         return false;
     }
+    // 根据范围数组大小调整遍历的分块大小
     if (range_start + *chunk_size > traverse_range_.size()) {
         *chunk_size = traverse_range_.size() - range_start;
     }
 
     vid_t range_end = range_start + *chunk_size;
+    // 遍历"遍历范围数组"中的对应部分结点分区
     for (vid_t range_i = range_start; range_i < range_end; ++range_i) {
         vid_t v_start = traverse_range_[range_i].first;
         vid_t v_end = traverse_range_[range_i].second;
-
+        /// 遍历分区中的每个结点
         for (vid_t v_i = v_start; v_i < v_end; ++v_i) {
+            // 对应结点没有边则跳过
             if (0 == bitmap_->get_bit(v_i)) {
                 continue;
             }
@@ -676,6 +706,7 @@ bool bcsr_t<EDATA, PART_IMPL, ALLOC>::next_chunk(traversal_t traversal,
             eid_t idx_start = index_.get()[v_i];
             eid_t idx_end = index_.get()[v_i + 1];
 
+            // 遍历该结点的邻接表
             if (false ==
                 traversal(v_i, adj_unit_list_spec_t(&adjs_.get()[idx_start],
                                                     &adjs_.get()[idx_end]))) {

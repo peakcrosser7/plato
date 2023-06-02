@@ -155,17 +155,25 @@ class sequence_v_view { // sequence partition view
  **/
 
 // edge belong to source node's partition
+/// @brief 根据边的源结点的划分序列
 class sequence_balanced_by_source_t {
   public:
     // *******************************************************************************
     // // required types & methods
 
     // get edge's partition
+    /// @brief  根据源结点获取边所在的子图分区(集群节点) get edge's partition
+    /// @param src 源结点
+    /// @param dst 终结点
+    /// @return 所在的子图分区(集群节点)
     inline int get_partition_id(vid_t src, vid_t /*dst*/) {
         return get_partition_id(src);
     }
 
     // get vertex's partition
+    /// @brief 获取结点的子图分区(集群节点) get vertex's partition
+    /// @param v_i 结点ID
+    /// @return 所在的子图分区(集群节点)
     inline int get_partition_id(vid_t v_i) {
         for (size_t p_i = 0; p_i < (offset_.size() - 1); ++p_i) {
             if (v_i >= offset_[p_i] && v_i < offset_[p_i + 1]) {
@@ -215,6 +223,7 @@ class sequence_balanced_by_source_t {
     // *******************************************************************************
     // //
 
+    /// @brief 集群节点对应的结点偏移量数组
     std::vector<vid_t> offset_;
 
     // *******************************************************************************
@@ -222,14 +231,13 @@ class sequence_balanced_by_source_t {
 };
 
 // edge belong to destination node's partition
-
 /// @brief 根据边的终结点的划分序列
 class sequence_balanced_by_destination_t {
   public:
     // *******************************************************************************
     // // required types & methods
 
-    /// @brief  获取边所在的子图分区(集群节点) get edge's partition
+    /// @brief  根据终结点获取边所在的子图分区(集群节点) get edge's partition
     /// @param src 源结点
     /// @param dst 终结点
     /// @return 所在的子图分区(集群节点)
@@ -289,13 +297,15 @@ class sequence_balanced_by_destination_t {
     // *******************************************************************************
     // //
 
-    /// @brief 机器节点对应的结点偏移量数组
+    /// @brief 集群节点对应的结点偏移量数组
     std::vector<vid_t> offset_;
 
     // *******************************************************************************
     // //
 };
 
+/// @brief 判断子图分区类型是否是序列类型
+/// @tparam PART 子图分区类型
 template <typename PART> constexpr bool is_seq_part(void) {
     return std::is_same<PART, sequence_balanced_by_source_t>::value ||
            std::is_same<PART, sequence_balanced_by_destination_t>::value;

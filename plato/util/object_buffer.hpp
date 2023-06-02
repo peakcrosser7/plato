@@ -597,15 +597,15 @@ void object_block_buffer_t<T>::reset_traversal(const traverse_opts_t &opts) {
     used_block_num_ = (size_ + block_size_ - 1) / block_size_;
 }
 
-/// @brief 遍历一些分块并对分块中的每个对象执行操作
+/// @brief 遍历一分块的对象并对分块中的每个对象执行操作象(线程安全)
 /// @param traversal 遍历操作(函数,伪函数)
-/// @param[in,out] chunk_size 遍历的分块数
-/// @return 执行成功
+/// @param[in,out] chunk_size 分块大小
+/// @return 是否有对象被遍历
 template <typename T>
 template <typename Traversal>
 bool object_block_buffer_t<T>::next_chunk(Traversal &&traversal,
                                           size_t *chunk_size) {
-    // 根据可用线程数确定实际遍历的分块数
+    // 根据可用线程数确定实际遍历的分块大小
     size_t max_chunk_size = used_block_num_ / omp_get_num_threads() + 1;
     if (max_chunk_size < *chunk_size)
         *chunk_size = max_chunk_size;
@@ -613,7 +613,7 @@ bool object_block_buffer_t<T>::next_chunk(Traversal &&traversal,
         traverse_i_.fetch_add(*chunk_size, std::memory_order_relaxed);
     if (range_start >= used_block_num_)
         return false;
-    // 根据使用的分块数调整遍历的分块数
+    // 根据使用的block数调整遍历的chunk大小
     if (range_start + *chunk_size >= used_block_num_) {
         *chunk_size = used_block_num_ - range_start;
     }

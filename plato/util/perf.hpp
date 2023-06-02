@@ -24,9 +24,9 @@
 
 #include <sys/time.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstdint>
 #include <cstring>
 
 #include <map>
@@ -34,81 +34,91 @@
 
 namespace plato {
 
+/// @brief 进程内存状态信息
 struct mem_status_t {
-  size_t vm_peak; // KBytes
-  size_t vm_size; // KBytes
-  size_t vm_hwm;  // KBytes
-  size_t vm_rss;  // KBytes
+    /// @brief 进程使用的物理内存大小(KBytes)
+    size_t vm_peak;
+    /// @brief 进程使用的峰值物理内存大小(KBytes)
+    size_t vm_size;
+    /// @brief 进程当前使用的虚拟内存大小(整个程序的大小)(KBytes)
+    size_t vm_hwm;
+    /// @brief 进程使用的峰值虚拟内存大小(KBytes)
+    size_t vm_rss;
 };
 
-inline void self_mem_usage(mem_status_t* status) {
-  char buffer[1024] = "";
-
-  FILE* file = fopen("/proc/self/status", "r");
-  while (fscanf(file, " %1023s", buffer) == 1) {
-    if (strcmp(buffer, "VmRSS:") == 0) {
-      fscanf(file, " %lu", &status->vm_rss);
+/// @brief 获取本进程的内存状态信息
+/// @param[out] status 
+inline void self_mem_usage(mem_status_t *status) {
+    char buffer[1024] = "";
+    // 打开当前进程的状态信息文件
+    FILE *file = fopen("/proc/self/status", "r");
+    while (fscanf(file, " %1023s", buffer) == 1) {
+        // 当前进程使用的物理内存大小
+        if (strcmp(buffer, "VmRSS:") == 0) {
+            fscanf(file, " %lu", &status->vm_rss);
+        }
+        // 当前进程使用的峰值物理内存大小
+        if (strcmp(buffer, "VmHWM:") == 0) {
+            fscanf(file, " %lu", &status->vm_hwm);
+        }
+        // 当前进程当前使用的虚拟内存大小(整个程序的大小)
+        if (strcmp(buffer, "VmSize:") == 0) {
+            fscanf(file, " %lu", &status->vm_size);
+        }
+        // 当前进程使用的峰值虚拟内存大小
+        if (strcmp(buffer, "VmPeak:") == 0) {
+            fscanf(file, " %lu", &status->vm_peak);
+        }
     }
-    if (strcmp(buffer, "VmHWM:") == 0) {
-      fscanf(file, " %lu", &status->vm_hwm);
-    }
-    if (strcmp(buffer, "VmSize:") == 0) {
-      fscanf(file, " %lu", &status->vm_size);
-    }
-    if (strcmp(buffer, "VmPeak:") == 0) {
-      fscanf(file, " %lu", &status->vm_peak);
-    }
-  }
-  fclose(file);
+    fclose(file);
 }
 
 /// @brief 当前时间
 /// @return 以毫秒为单位的当前时间
 inline double current_milliseconds(void) {
-  struct timeval tv;
-  gettimeofday(&tv, nullptr);
-  return tv.tv_sec * 1000UL + tv.tv_usec / 1000UL;
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    return tv.tv_sec * 1000UL + tv.tv_usec / 1000UL;
 }
 
 /// @brief 计时器
 class stop_watch_t {
-public:
-  // start a new mark
-  /// @brief 记录一个新的时间
-  /// @param smark 标志字符串
-  void mark(const std::string& smark) {
-    mark_[smark] = current_milliseconds();
-  }
+  public:
+    // start a new mark
+    /// @brief 记录一个新的时间
+    /// @param smark 标志字符串
+    void mark(const std::string &smark) {
+        mark_[smark] = current_milliseconds();
+    }
 
-  // return a mark's cost in milliseconds
-  double show(const std::string& smark) {
-    return current_milliseconds() - mark_[smark];
-  }
+    // return a mark's cost in milliseconds
+    double show(const std::string &smark) {
+        return current_milliseconds() - mark_[smark];
+    }
 
-  // return a mark's cost in milliseconds
-  std::string showlit_mills(const std::string& smark) {
-    double cost = current_milliseconds() - mark_[smark];
-    return std::string(std::to_string(cost) + "ms");
-  }
+    // return a mark's cost in milliseconds
+    std::string showlit_mills(const std::string &smark) {
+        double cost = current_milliseconds() - mark_[smark];
+        return std::string(std::to_string(cost) + "ms");
+    }
 
-  // return a mark's cost in milliseconds
-  std::string showlit_seconds(const std::string& smark) {
-    double cost = current_milliseconds() - mark_[smark];
-    return std::string(std::to_string(cost / 1000.0) + "s");
-  }
+    // return a mark's cost in milliseconds
+    std::string showlit_seconds(const std::string &smark) {
+        double cost = current_milliseconds() - mark_[smark];
+        return std::string(std::to_string(cost / 1000.0) + "s");
+    }
 
-  // remove mark and return its cost
-  double stop(const std::string& smark) {
-    double cost = current_milliseconds() - mark_[smark];
-    mark_.erase(smark);
-    return cost;
-  }
+    // remove mark and return its cost
+    double stop(const std::string &smark) {
+        double cost = current_milliseconds() - mark_[smark];
+        mark_.erase(smark);
+        return cost;
+    }
 
-protected:
-  std::map<std::string, double> mark_;
+  protected:
+    std::map<std::string, double> mark_;
 };
 
-}  // namespace plato
+} // namespace plato
 
 #endif
-

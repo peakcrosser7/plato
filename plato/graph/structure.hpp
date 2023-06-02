@@ -1114,13 +1114,14 @@ create_dualmode_seq_from_path(
     watch.mark("t1");
 
     bcsr_spec_t bcsr(part_bcsr);
-    // 加载边信息到位图CSR
+    // 从边缓存加载边信息到BCSR
     CHECK(0 == bcsr.load_from_cache(*pgraph_info, *cache));
 
     if (0 == cluster_info.partition_id_) {
         LOG(INFO) << "build bcsr cost: " << watch.show("t1") / 1000.0 << "s";
     }
 
+    // 获取本进程内存状态信息
     plato::mem_status_t mstatus;
     plato::self_mem_usage(&mstatus);
 
@@ -1143,6 +1144,7 @@ create_dualmode_seq_from_path(
     {
         plato::traverse_opts_t opts;
         opts.mode_ = plato::traverse_mode_t::RANDOM;
+        // 从BCSR图结构中加载边到DCSC
         CHECK(0 == dcsc.load_from_graph(*pgraph_info, bcsr, true, opts));
     }
 
