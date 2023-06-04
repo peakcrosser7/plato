@@ -44,18 +44,26 @@ namespace plato {
 // *******************************************************************************
 // // aggregate message
 
+/// @brief 信息传递聚合的封装消息
+/// @tparam MSG 消息类型
 template <typename MSG> struct mepa_ag_message_t {
+    /// @brief 结点
     vid_t v_i_;
+    /// @brief 具体消息
     MSG message_;
 
     template <typename Ar> void serialize(Ar &ar) { ar &v_i_ &message_; }
 };
 
+/// @brief 信息传递聚合发送回调函数
 template <typename MSG>
 using mepa_ag_send_callback_t =
     std::function<void(const mepa_ag_message_t<MSG> &)>;
 
+/// @brief 信息传递聚合上下文
+/// @tparam MSG 消息类型
 template <typename MSG> struct mepa_ag_context_t {
+    /// @brief 发送回调函数
     mepa_ag_send_callback_t<MSG> send;
 };
 
@@ -282,10 +290,14 @@ R spread_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
 // *******************************************************************************
 // // broadcast message
 
+/// @brief 消息传递广播发送回调函数
 template <typename MSG>
 using mepa_bc_send_callback_t = std::function<void(const MSG &)>;
 
+/// @brief 消息传递广播上下文
+/// @tparam MSG 消息类型
 template <typename MSG> struct mepa_bc_context_t {
+    /// @brief 发送回调函数
     mepa_bc_send_callback_t<MSG> send;
 };
 

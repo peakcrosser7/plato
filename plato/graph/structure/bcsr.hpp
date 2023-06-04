@@ -204,15 +204,17 @@ class bcsr_t {
 
     // SFINAE only works for deduced template arguments, it's tricky here
 
-    /// @brief 获取子图的起点(序列分区实现)
-    /// @tparam PART 子图分区类型
+    /// @brief 子图分区的起点(序列分区实现)
+    /// @param p_i 子图ID
+    /// @return 起始结点ID
     template <typename PART>
     typename std::enable_if<is_seq_part<PART>(), vid_t>::type partition_start(
         int p_i) {
         return partitioner_->offset_[p_i];
     }
-    /// @brief 获取子图的终点(序列分区实现)
-    /// @tparam PART 子图分区类型
+    /// @brief 子图分区的终点(序列分区实现)
+    /// @param p_i 子图ID
+    /// @return 起始结点ID
     template <typename PART>
     typename std::enable_if<is_seq_part<PART>(), vid_t>::type partition_end(
         int p_i) {
@@ -221,16 +223,14 @@ class bcsr_t {
 
     // SFINAE only works for deduced template arguments, it's tricky here
 
-    /// @brief 获取子图的起点(非序列分区实现报错)
-    /// @tparam PART 子图分区类型
+    /// @brief 子图分区的起点(非序列分区实现报错)
     template <typename PART>
     typename std::enable_if<!is_seq_part<PART>(), vid_t>::type partition_start(
         int) {
         CHECK(false);
         return -1;
     }
-    /// @brief 获取子图的终点(非序列分区实现报错)
-    /// @tparam PART 子图分区类型
+    /// @brief 子图分区的终点(非序列分区实现报错)
     template <typename PART>
     typename std::enable_if<!is_seq_part<PART>(), vid_t>::type partition_end(
         int) {
@@ -673,7 +673,7 @@ void bcsr_t<EDATA, PART_IMPL, ALLOC>::reset_traversal(
     }
 }
 
-/// @brief 处理一分块的边并对分块中的每条边执行操作(线程安全)
+/// @brief 处理一个分块的边并对分块中的每条边执行操作(线程安全)
 /// @param traversal 遍历操作(函数,伪函数)
 /// @param[in,out] chunk_size 分块大小 
 /// @return 是否有边被遍历
@@ -696,7 +696,7 @@ bool bcsr_t<EDATA, PART_IMPL, ALLOC>::next_chunk(traversal_t traversal,
     for (vid_t range_i = range_start; range_i < range_end; ++range_i) {
         vid_t v_start = traverse_range_[range_i].first;
         vid_t v_end = traverse_range_[range_i].second;
-        /// 遍历分区中的每个结点
+        // 遍历分区中的每个结点
         for (vid_t v_i = v_start; v_i < v_end; ++v_i) {
             // 对应结点没有边则跳过
             if (0 == bitmap_->get_bit(v_i)) {

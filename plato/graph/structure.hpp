@@ -89,8 +89,8 @@ using vencoder_t =
  * \tparam VID_T        vertex id type, can be uint32_t or uint64_t
  *
  * \param path          input file path, 'path' can be a file or a directory.
- *                      'path' can be located on hdfs or posix, distinguish by its prefix.
- *                      eg: 'hdfs://' means hdfs, '/' means posix, 'wfs://' means wfs
+ *                      'path' can be located on hdfs or posix, distinguish by
+ *its prefix. eg: 'hdfs://' means hdfs, '/' means posix, 'wfs://' means wfs
  * \param format        file format
  * \param decoder       edge data decode, string => EDATA
  * \param callback      function executed when parsing data
@@ -100,17 +100,18 @@ template <typename EDATA, typename VID_T = vid_t>
 void read_from_files(const std::string &path, edge_format_t format,
                      decoder_t<EDATA> decoder,
                      data_callback_t<EDATA, VID_T> callback) {
-
     auto &cluster_info = cluster_info_t::get_instance();
     edge_parser_t<boost::iostreams::filtering_istream, EDATA, VID_T> parser;
     switch (format) {
-    case edge_format_t::CSV:    // 只支持csv格式数据
-        parser = csv_parser<boost::iostreams::filtering_istream, EDATA, VID_T>;
-        break;
-    default:
-        LOG(ERROR) << "unknown format: " << (uint64_t)format;
-        throw std::runtime_error(
-            (boost::format("unknown format: %lu") % (uint64_t)format).str());
+        case edge_format_t::CSV:  // 只支持csv格式数据
+            parser =
+                csv_parser<boost::iostreams::filtering_istream, EDATA, VID_T>;
+            break;
+        default:
+            LOG(ERROR) << "unknown format: " << (uint64_t)format;
+            throw std::runtime_error(
+                (boost::format("unknown format: %lu") % (uint64_t)format)
+                    .str());
     }
 
     // 本节点需要处理的文件分块列表
@@ -123,8 +124,7 @@ void read_from_files(const std::string &path, edge_format_t format,
             std::string filename;
             {
                 std::lock_guard<std::mutex> lock(files_lock);
-                if (files.empty())
-                    break;
+                if (files.empty()) break;
                 filename = std::move(files.back());
                 files.pop_back();
             }
@@ -142,15 +142,16 @@ void read_from_files(const std::string &path, edge_format_t format,
  *
  * \tparam EDATA        data bind on edge
  * \tparam VID_T        vertex id type, can be uint32_t or uint64_t
- * \tparam CACHE        cache type, can be edge_block_cache_t or edge_file_cache_t or edge_cache_t
+ * \tparam CACHE        cache type, can be edge_block_cache_t or
+ *edge_file_cache_t or edge_cache_t
  *
  * \param path          input file path, 'path' can be a file or a directory.
- *                      'path' can be located on hdfs or posix, distinguish by its prefix.
- *                      eg: 'hdfs://' means hdfs, '/' means posix, 'wfs://' means wfs
+ *                      'path' can be located on hdfs or posix, distinguish by
+ *its prefix. eg: 'hdfs://' means hdfs, '/' means posix, 'wfs://' means wfs
  * \param format        file format
  * \param decoder       edge data decode, string => EDATA
  * \param callback      function executed when parsing data
- * \param vid_encoder   encoder for data 
+ * \param vid_encoder   encoder for data
  *
  **/
 template <typename EDATA, typename VID_T = vid_t,
@@ -179,26 +180,26 @@ void load_edges_cache_with_encoder(
  *
  * \tparam EDATA        data bind on edge
  * \tparam VID_T        vertex id type, can be uint32_t or uint64_t
- * \tparam CACHE        cache type, can be edge_block_cache_t or edge_file_cache_t or edge_cache_t
+ * \tparam CACHE        cache type, can be edge_block_cache_t or
+ *edge_file_cache_t or edge_cache_t
  *
  * \param pginfo        graph info
  * \param path          input file path, 'path' can be a file or a directory.
- *                      'path' can be located on hdfs or posix, distinguish by its prefix.
- *                      eg: 'hdfs://' means hdfs, '/' means posix, 'wfs://' means wfs
+ *                      'path' can be located on hdfs or posix, distinguish by
+ *its prefix. eg: 'hdfs://' means hdfs, '/' means posix, 'wfs://' means wfs
  * \param format        file format
  * \param decoder       edge data decode, string => EDATA
  * \param callback      function executed when parsing data
- * \param vid_encoder   encoder for data 
+ * \param vid_encoder   encoder for data
  *
  * \return loaded cache or nullptr
  **/
 template <typename EDATA, typename VID_T = vid_t,
           template <typename, typename> class CACHE = edge_block_cache_t>
-std::shared_ptr<CACHE<EDATA, vid_t>>
-load_edges_cache(graph_info_t *pginfo, const std::string &path,
-                 edge_format_t format, decoder_t<EDATA> decoder,
-                 data_callback_t<EDATA, vid_t> callback = nullptr,
-                 vencoder_t<EDATA, VID_T, CACHE> vid_encoder = nullptr) {
+std::shared_ptr<CACHE<EDATA, vid_t>> load_edges_cache(
+    graph_info_t *pginfo, const std::string &path, edge_format_t format,
+    decoder_t<EDATA> decoder, data_callback_t<EDATA, vid_t> callback = nullptr,
+    vencoder_t<EDATA, VID_T, CACHE> vid_encoder = nullptr) {
     // 数据图总边数
     eid_t edges = 0;
     // 数据图全局结点位图(有该结点则对应位为1)
@@ -214,8 +215,7 @@ load_edges_cache(graph_info_t *pginfo, const std::string &path,
             v_bitmap.set_bit(input[i].dst_);
         }
         cache->push_back(input, size);
-        if (nullptr != callback)
-            callback(input, size);
+        if (nullptr != callback) callback(input, size);
         return true;
     };
 
@@ -318,19 +318,23 @@ std::vector<T> generate_dense_in_degrees(const graph_info_t &graph_info,
     return degrees;
 }
 
-// generate dense degrees from graph, only keep degrees in this partition
-// std::vector is not a good option
+/// @brief 从图中生成稠密的结点度数数据 generate dense degrees from graph, only keep degrees in this
+/// partition, std::vector is not a good option
+/// @param graph_info 图信息
+/// @param graph 图结构
+/// @param is_out_degrees 是否是出度
+/// @param is_out_edge 是否是出边
+/// @return 度数的稠密状态数据
 template <typename T, typename GRAPH>
-dense_state_t<T, typename GRAPH::partition_t>
-generate_dense_degrees_fg(const graph_info_t &graph_info, GRAPH &graph,
-                          bool is_out_degrees, bool is_out_edge) {
-
+dense_state_t<T, typename GRAPH::partition_t> generate_dense_degrees_fg(
+    const graph_info_t &graph_info, GRAPH &graph, bool is_out_degrees,
+    bool is_out_edge) {
     using partition_t = typename GRAPH::partition_t;
     using adj_unit_spec_t = typename GRAPH::adj_unit_spec_t;
     using adj_unit_list_spec_t = typename GRAPH::adj_unit_list_spec_t;
-
+    // 结点度数数组
     std::vector<T> all_degrees(graph_info.max_v_i_ + 1, 0);
-
+    // 遍历边统计度数的函数
     auto e_traversal = [&](vid_t v_i, const adj_unit_list_spec_t &adjs) {
         if ((is_out_edge && is_out_degrees) ||
             (false == is_out_edge && false == is_out_degrees)) {
@@ -344,18 +348,20 @@ generate_dense_degrees_fg(const graph_info_t &graph_info, GRAPH &graph,
     };
 
     graph.reset_traversal();
+    // 并行遍历边统计度数
 #pragma omp parallel
     {
         size_t chunk_size = 1;
         while (graph.next_chunk(e_traversal, &chunk_size)) {
         }
     }
+    // 获取全局结点的度数
     allreduce(MPI_IN_PLACE, all_degrees.data(), graph_info.max_v_i_ + 1,
               get_mpi_data_type<T>(), MPI_SUM, MPI_COMM_WORLD);
 
     dense_state_t<T, partition_t> degrees(graph_info.max_v_i_,
                                           graph.partitioner());
-
+    // 设置每个结点对应的度数
     auto v_traversal = [&](vid_t v_i, vid_t *pval) {
         *pval = all_degrees[v_i];
         return true;
@@ -372,17 +378,25 @@ generate_dense_degrees_fg(const graph_info_t &graph_info, GRAPH &graph,
     return degrees;
 }
 
+/// @brief 从图中生成稠密的结点出度数据
+/// @param graph_info 图信息
+/// @param graph 图结构
+/// @param is_out_edge 是否是出边
+/// @return 出度稠密状态数据
 template <typename T, typename GRAPH>
-dense_state_t<T, typename GRAPH::partition_t>
-generate_dense_out_degrees_fg(const graph_info_t &graph_info, GRAPH &graph,
-                              bool is_out_edge) {
+dense_state_t<T, typename GRAPH::partition_t> generate_dense_out_degrees_fg(
+    const graph_info_t &graph_info, GRAPH &graph, bool is_out_edge) {
     return generate_dense_degrees_fg<T>(graph_info, graph, true, is_out_edge);
 }
 
+/// @brief 从图中生成稠密的结点入度数据
+/// @param graph_info 图信息
+/// @param graph 图结构
+/// @param is_out_edge 是否是出边
+/// @return 入度稠密状态数据
 template <typename T, typename GRAPH>
-dense_state_t<T, typename GRAPH::partition_t>
-generate_dense_in_degrees_fg(const graph_info_t &graph_info, GRAPH &graph,
-                             bool is_out_edge) {
+dense_state_t<T, typename GRAPH::partition_t> generate_dense_in_degrees_fg(
+    const graph_info_t &graph_info, GRAPH &graph, bool is_out_edge) {
     return generate_dense_degrees_fg<T>(graph_info, graph, false, is_out_edge);
 }
 
@@ -401,11 +415,9 @@ generate_dense_in_degrees_fg(const graph_info_t &graph_info, GRAPH &graph,
  *    sparse state that hold vertex's degree belong to self partition
  **/
 template <typename T, typename PART_IMPL, typename EDGE_CACHE>
-sparse_state_t<T, PART_IMPL>
-generate_sparse_out_degrees(const graph_info_t &graph_info,
-                            std::shared_ptr<PART_IMPL> part,
-                            EDGE_CACHE &cache) {
-
+sparse_state_t<T, PART_IMPL> generate_sparse_out_degrees(
+    const graph_info_t &graph_info, std::shared_ptr<PART_IMPL> part,
+    EDGE_CACHE &cache) {
     static_assert(std::is_integral<T>::value, "T can only be integral type");
 
     using edge_unit_spec_t = typename EDGE_CACHE::edge_unit_spec_t;
@@ -514,7 +526,6 @@ std::shared_ptr<dcsc_t<EDATA, SEQ_PART>> create_dcsc_seq_from_path(
     graph_info_t *pgraph_info, const std::string &path, edge_format_t format,
     decoder_t<EDATA> decoder, int alpha = -1, bool use_in_degree = false,
     vencoder_t<EDATA, VID_T, CACHE> vid_encoder = nullptr) {
-
     static_assert(
         std::is_same<SEQ_PART, sequence_balanced_by_source_t>::value ||
             std::is_same<SEQ_PART, sequence_balanced_by_destination_t>::value,
@@ -632,13 +643,11 @@ create_dcsc_seqd_from_path(
  **/
 template <typename EDATA, typename SEQ_PART, typename VID_T = vid_t,
           template <typename, typename> class CACHE = edge_block_cache_t>
-std::shared_ptr<bcsr_t<EDATA, SEQ_PART>>
-create_bcsr_seq_from_path(graph_info_t *pgraph_info, const std::string &path,
-                          edge_format_t format, decoder_t<EDATA> decoder,
-                          int alpha = -1, bool use_in_degree = false,
-                          vencoder_t<EDATA, VID_T, CACHE> vid_encoder = nullptr,
-                          bool is_outgoing = true) {
-
+std::shared_ptr<bcsr_t<EDATA, SEQ_PART>> create_bcsr_seq_from_path(
+    graph_info_t *pgraph_info, const std::string &path, edge_format_t format,
+    decoder_t<EDATA> decoder, int alpha = -1, bool use_in_degree = false,
+    vencoder_t<EDATA, VID_T, CACHE> vid_encoder = nullptr,
+    bool is_outgoing = true) {
     static_assert(
         std::is_same<SEQ_PART, sequence_balanced_by_source_t>::value ||
             std::is_same<SEQ_PART, sequence_balanced_by_destination_t>::value,
@@ -808,7 +817,6 @@ std::shared_ptr<tcsr_t<EDATA, VDATA, HASH_PART>> create_tcsr_hash_from_path(
     graph_info_t *pgraph_info, const std::string &path, edge_format_t format,
     decoder_t<EDATA> decoder,
     vencoder_t<EDATA, VID_T, CACHE> vid_encoder = nullptr) {
-
     auto &cluster_info = cluster_info_t::get_instance();
     HASH_PART partition;
 
@@ -867,8 +875,7 @@ std::shared_ptr<tcsr_t<EDATA, VDATA, HASH_PART>> create_tcsr_hash_from_path(
         auto __send = [&](bsp_send_callback_t<degree_msg> send) {
             while (true) {
                 size_t begin = __sync_fetch_and_add(&vid, MBYTES);
-                if (begin > max_vid)
-                    break;
+                if (begin > max_vid) break;
                 size_t end = std::min(size_t(max_vid) + 1, begin + MBYTES);
                 for (size_t v_i = begin; v_i < end; v_i++) {
                     vid_t degree = *(out_degree.get() + v_i);
@@ -904,7 +911,7 @@ std::shared_ptr<tcsr_t<EDATA, VDATA, HASH_PART>> create_tcsr_hash_from_path(
     watch.mark("t2");
     size_t local_degree_sum = 0;
     size_t local_vertices = 0;
-#pragma omp parallel for reduction(+ : local_degree_sum)                       \
+#pragma omp parallel for reduction(+ : local_degree_sum) \
     reduction(+ : local_vertices)
     for (size_t v_i = 0; v_i <= max_vid; v_i++) {
         if (partition.get_partition_id(v_i) == cluster_info.partition_id_ &&
@@ -1030,18 +1037,18 @@ create_tcsr_hashs_from_path(
  *
  * \tparam EDATA          data type bind to edge
  * \tparam VID_T          vertex id type, can be uint32_t or uint64_t
- * \tparam CACHE          cache type, can be edge_block_cache_t or edge_file_cache_t or edge_cache_t
+ * \tparam CACHE          cache type, can be edge_block_cache_t or
+ *edge_file_cache_t or edge_cache_t
  *
- * \param pgraph_info     user should fill 'is_directed_' field of  graph_info_t, this function
- *                        will fill other fields during load process.
- * \param path            input file path, 'path' can be a file or a directory.
- *                        'path' can be located on hdfs or posix, distinguish by its prefix.
- *                        eg: 'hdfs://' means hdfs, '/' means posix, 'wfs://' means wfs
- * \param format          file format
- * \param decoder         edge data decode, string => EDATA
- * \param is_directed     the graph is directed or not
- * \param alpha           vertex's weighted for partition, -1 means use default
- * \param use_in_degree   use in-degree instead of out degree for partition
+ * \param pgraph_info     user should fill 'is_directed_' field of graph_info_t,
+ *this function will fill other fields during load process. \param path input
+ *file path, 'path' can be a file or a directory. 'path' can be located on hdfs
+ *or posix, distinguish by its prefix. eg: 'hdfs://' means hdfs, '/' means
+ *posix, 'wfs://' means wfs \param format          file format \param decoder
+ *edge data decode, string => EDATA \param is_directed     the graph is directed
+ *or not \param alpha           vertex's weighted for partition, -1 means use
+ *default \param use_in_degree   use in-degree instead of out degree for
+ *partition
  *
  * \return graph structure in dual-mode, first -- bcsr, second -- dcsc
  **/
@@ -1053,7 +1060,6 @@ create_dualmode_seq_from_path(
     graph_info_t *pgraph_info, const std::string &path, edge_format_t format,
     decoder_t<EDATA> decoder, int alpha = -1, bool use_in_degree = false,
     vencoder_t<EDATA, VID_T, CACHE> vid_encoder = nullptr) {
-
     using bcsr_spec_t =
         plato::bcsr_t<EDATA, plato::sequence_balanced_by_destination_t>;
     using dcsc_spec_t =
@@ -1084,10 +1090,10 @@ create_dualmode_seq_from_path(
     std::shared_ptr<plato::sequence_balanced_by_destination_t> part_bcsr =
         nullptr;
     {
-        std::vector<vid_t> degrees; // 结点入度或出度数组
-        if (use_in_degree) {    // 使用入度进行图划分
+        std::vector<vid_t> degrees;  // 结点入度或出度数组
+        if (use_in_degree) {         // 使用入度进行图划分
             degrees = generate_dense_in_degrees<vid_t>(*pgraph_info, *cache);
-        } else {    // 使用出度进行图划分
+        } else {  // 使用出度进行图划分
             degrees = generate_dense_out_degrees<vid_t>(*pgraph_info, *cache);
         }
 
@@ -1128,7 +1134,7 @@ create_dualmode_seq_from_path(
     LOG(INFO) << "memory usage(bcsr + cache): "
               << (double)mstatus.vm_rss / 1024.0 / 1024.0 << " GBytes";
 
-    cache = nullptr; // destroy edges cache
+    cache = nullptr;  // destroy edges cache
 
     plato::self_mem_usage(&mstatus);
     LOG(INFO) << "memory usage(bcsr): "
@@ -1192,7 +1198,6 @@ create_dualmode_bcsr_seq_from_path(
     graph_info_t *pgraph_info, const std::string &path, edge_format_t format,
     decoder_t<EDATA> decoder, int alpha = -1, bool use_in_degree = false,
     vencoder_t<EDATA, VID_T, CACHE> vid_encoder = nullptr) {
-
     using outgoing_t =
         plato::bcsr_t<EDATA, plato::sequence_balanced_by_destination_t>;
     using incoming_t =
@@ -1261,7 +1266,7 @@ create_dualmode_bcsr_seq_from_path(
     LOG(INFO) << "memory usage(outgoing + cache): "
               << (double)mstatus.vm_rss / 1024.0 / 1024.0 << " GBytes";
 
-    cache = nullptr; // destroy edges cache
+    cache = nullptr;  // destroy edges cache
 
     plato::self_mem_usage(&mstatus);
     LOG(INFO) << "memory usage(outgoing): "
@@ -1300,6 +1305,6 @@ create_dualmode_bcsr_seq_from_path(
 // *******************************************************************************
 // //
 
-} // namespace plato
+}  // namespace plato
 
 #endif

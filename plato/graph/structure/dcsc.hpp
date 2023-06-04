@@ -87,7 +87,7 @@ class dcsc_t {
     template <typename EDGE_CACHE>
     int load_from_cache(const graph_info_t &graph_info, EDGE_CACHE &cache);
 
-    // get partitioner
+    /// @brief 返回结点划分序列 get partitioner
     std::shared_ptr<partition_t> partitioner(void) { return partitioner_; }
 
     // traverse interface
@@ -160,25 +160,34 @@ class dcsc_t {
     std::shared_ptr<adj_unit_spec_t> adjs_;
     /// @brief 节点本地数据图邻接表结点索引数组(DCSC列偏移)
     std::shared_ptr<eid_t> index_;
-    /// @brief 节点本地数据图右边结点数组(DCSC非零元数组)
+    /// @brief 节点本地数据图有边结点数组(DCSC非零元数组)
     std::shared_ptr<vid_t> local_vertex_;
 
     allocator_type allocator_;
 
     // traverse related
-    static const vid_t basic_chunk =
-        64; // do not basic_chunk too big, try to keep parallel edges access
-            // within L3 cache
+    static const vid_t basic_chunk = 64; // do not basic_chunk too big, try to keep parallel 
+                                         // edges access within L3 cache
+    /// @brief 遍历索引
     std::atomic<vid_t> traverse_i_;
+    /// @brief 遍历范围数组
     std::vector<std::pair<vid_t, vid_t>> traverse_range_;
+    /// @brief 遍历选项
     traverse_opts_t traverse_opts_;
 
     // SFINAE only works for deduced template arguments, it's tricky here
+    
+    /// @brief 子图分区的起点(序列分区实现)
+    /// @param p_i 子图ID
+    /// @return 起始结点ID
     template <typename PART>
     typename std::enable_if<is_seq_part<PART>(), vid_t>::type
     partition_start(int p_i) {
         return partitioner_->offset_[p_i];
     }
+    /// @brief 子图分区的终点(序列分区实现)
+    /// @param p_i 子图ID
+    /// @return 起始结点ID
     template <typename PART>
     typename std::enable_if<is_seq_part<PART>(), vid_t>::type
     partition_end(int p_i) {
@@ -186,12 +195,15 @@ class dcsc_t {
     }
 
     // SFINAE only works for deduced template arguments, it's tricky here
+    
+    /// @brief 子图分区的起点(非序列分区实现报错)
     template <typename PART>
     typename std::enable_if<!is_seq_part<PART>(), vid_t>::type
     partition_start(int) {
         CHECK(false);
         return -1;
     }
+    /// @brief 子图分区的终点(非序列分区实现报错)
     template <typename PART>
     typename std::enable_if<!is_seq_part<PART>(), vid_t>::type
     partition_end(int) {
@@ -509,23 +521,29 @@ int dcsc_t<EDATA, PART_IMPL, ALLOC>::load_from_graph(
                                foreach_dests, foreach_edges);
 }
 
+/// @brief 重置遍历
+/// @param opts 遍历选项
 template <typename EDATA, typename PART_IMPL, typename ALLOC>
 void dcsc_t<EDATA, PART_IMPL, ALLOC>::reset_traversal(traverse_opts_t opts) {
     traverse_i_.store(0, std::memory_order_relaxed);
 
+    // 遍历选项不变且遍历范围数组不为空时返回,使用先前缓存的范围
     if ((traverse_opts_.mode_ == opts.mode_) && traverse_range_.size()) {
         return; // use cached range
     }
     traverse_opts_ = opts;
 
+    // 构建默认的遍历数组
     auto build_ranges_origin = [&](void) {
+        // 分块数
         size_t buckets =
             std::min((size_t)(MBYTES), (size_t)vertices_ / basic_chunk + 1);
 
         traverse_range_.resize(buckets);
+        // 剩余结点数
         vid_t remained_vertices = vertices_;
         vid_t v_start = 0;
-
+        // 分配结点到桶中
         for (size_t i = 0; i < buckets; ++i) {
             if ((buckets - 1) == i) {
                 traverse_range_[i].first = v_start;
@@ -545,6 +563,7 @@ void dcsc_t<EDATA, PART_IMPL, ALLOC>::reset_traversal(traverse_opts_t opts) {
         CHECK(0 == remained_vertices);
     };
 
+    // 根据遍历模式设置遍历范围数组
     switch (traverse_opts_.mode_) {
     case traverse_mode_t::ORIGIN:
         build_ranges_origin();
@@ -565,6 +584,7 @@ void dcsc_t<EDATA, PART_IMPL, ALLOC>::reset_traversal(traverse_opts_t opts) {
                 cluster_info.partitions_, std::make_pair(0, 0));
 
             // divid & conquer to speed up ??
+            // 将本地结点的边按照源结点所在的集群分区划分位区间
             for (; v_i < vertices_ && p_i < cluster_info.partitions_; ++v_i) {
                 if (local_vertex_.get()[v_i] >= p_v_end) {
                     p_ranges[p_i].second = v_i;
@@ -584,7 +604,7 @@ void dcsc_t<EDATA, PART_IMPL, ALLOC>::reset_traversal(traverse_opts_t opts) {
             do {
                 uint64_t v_start = p_ranges[p_i].first;
                 uint64_t v_end = p_ranges[p_i].second;
-
+                // 按照basic_chunk大小进一步对区间分块
                 for (vid_t v_i = v_start; v_i < v_end; v_i += basic_chunk) {
                     uint64_t __v_end =
                         v_i + basic_chunk > v_end ? v_end : v_i + basic_chunk;
@@ -614,6 +634,10 @@ void dcsc_t<EDATA, PART_IMPL, ALLOC>::reset_traversal(traverse_opts_t opts) {
 #endif
 }
 
+/// @brief 处理一个分块的边并对分块中的每条边执行操作(线程安全)
+/// @param traversal 遍历操作(函数,伪函数)
+/// @param[in,out] chunk_size 分块大小 
+/// @return 是否有边被遍历
 template <typename EDATA, typename PART_IMPL, typename ALLOC>
 bool dcsc_t<EDATA, PART_IMPL, ALLOC>::next_chunk(traversal_t traversal,
                                                  size_t *chunk_size) {
@@ -628,15 +652,15 @@ bool dcsc_t<EDATA, PART_IMPL, ALLOC>::next_chunk(traversal_t traversal,
     }
 
     vid_t range_end = range_start + *chunk_size;
-
+    // 遍历"遍历范围数组"中的对应部分结点分区
     for (vid_t range_i = range_start; range_i < range_end; ++range_i) {
         vid_t v_start = traverse_range_[range_i].first;
         vid_t v_end = traverse_range_[range_i].second;
-
+        // 遍历分区中的每个右边结点的索引(DCSC)
         for (vid_t v_i = v_start; v_i < v_end; ++v_i) {
             eid_t idx_start = index_.get()[v_i];
             eid_t idx_end = index_.get()[v_i + 1];
-
+            // 根据索引得到对应结点并遍历
             if (false ==
                 traversal(local_vertex_.get()[v_i],
                           adj_unit_list_spec_t(&adjs_.get()[idx_start],

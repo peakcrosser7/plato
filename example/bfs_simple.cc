@@ -72,6 +72,7 @@ int main(int argc, char **argv) {
         plato::dummy_decoder<plato::empty_t>, FLAGS_alpha, FLAGS_part_by_in);
 
     plato::algo::bfs_opts_t opts;
+    // 设置起始结点
     opts.root_ = FLAGS_root;
 
     watch.mark("t0");

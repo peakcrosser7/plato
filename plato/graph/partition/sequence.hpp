@@ -304,7 +304,7 @@ class sequence_balanced_by_destination_t {
     // //
 };
 
-/// @brief 判断子图分区类型是否是序列类型
+/// @brief 判断子图分区类型是否是序列类型(有记录集群节点对应的结点范围的数组)
 /// @tparam PART 子图分区类型
 template <typename PART> constexpr bool is_seq_part(void) {
     return std::is_same<PART, sequence_balanced_by_source_t>::value ||
