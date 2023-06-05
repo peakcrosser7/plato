@@ -96,9 +96,11 @@ vid_t breadth_first_search(INCOMING& in_edges, OUTGOING& out_edges,
         active_next.clear();
 
         actives = engine.template foreach_edges<plato::vid_t, plato::vid_t>(
+            // 消息发送函数
             [&](const push_context_t& context, vid_t v_i) {
-                context.send(v_i);
+                context.send(v_i);  // 发送当前结点ID
             },
+            // 消息接收函数
             [&](int /*p_i*/, plato::vid_t& msg) {
                 plato::vid_t activated = 0;
 

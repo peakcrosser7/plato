@@ -604,8 +604,9 @@ int fine_grain_bsp(
     std::thread recv_assist_thread([&](void) {
         // 完成接收的节点数
         std::atomic<int> finished_count(0);
+        // 是否正在处理的标志位数组
         std::vector<bool> processing(opts.flying_recv_, false);
-        // 接收的数据
+        // 接收句柄
         std::vector<MPI_Request> requests_vec(opts.flying_recv_,
                                               MPI_REQUEST_NULL);
         // 非阻塞接受数据
@@ -777,7 +778,7 @@ int fine_grain_bsp(
                     --chunk_left[chunk.index_];
 
                     has_message = true;
-                    // 处理的分块达到批次
+                    // 处理的分块达到批次数
                     if (++processed >= batch_size) {
                         break;
                     }

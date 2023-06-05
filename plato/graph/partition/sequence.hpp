@@ -104,7 +104,8 @@ void __check_consistency(const std::vector<vid_t> &offset_) {
 
 } // namespace
 
-class sequence_v_view { // sequence partition view
+/// @brief 序列划分视图 sequence partition view
+class sequence_v_view {
   public:
     // *******************************************************************************
     // // required types & methods
@@ -137,8 +138,11 @@ class sequence_v_view { // sequence partition view
     vid_t end() { return end_; }
 
   protected:
+    /// @brief 起始结点ID
     vid_t start_;
+    /// @brief 终止结点ID
     vid_t end_;
+    /// @brief 遍历索引
     std::atomic<vid_t> traverse_i_;
 };
 
@@ -186,7 +190,7 @@ class sequence_balanced_by_source_t {
         abort();
     }
 
-    // get all self vertex's view
+    /// @brief 获取本地节点对应的结点分区视图
     sequence_v_view self_v_view(void) {
         auto &cluster_info = cluster_info_t::get_instance();
         return sequence_v_view(offset_[cluster_info.partition_id_],
@@ -320,11 +324,17 @@ sequence_v_view::sequence_v_view(vid_t start, vid_t end)
 sequence_v_view::sequence_v_view(sequence_v_view &&other)
     : start_(other.start_), end_(other.end_), traverse_i_(start_) {}
 
+/// @brief 重置遍历
+/// @param opts 遍历选项
 void sequence_v_view::reset_traversal(const traverse_opts_t &opts) {
     CHECK(opts.mode_ == traverse_mode_t::ORIGIN);
     traverse_i_.store(start_, std::memory_order_relaxed);
 }
 
+/// @brief 处理一个分块的结点(线程安全)
+/// @param traversal 遍历操作函数
+/// @param[in,out] chunk_size 分块大小 
+/// @return 至少有结点被遍历
 template <typename TRAVERSAL>
 bool sequence_v_view::next_chunk(TRAVERSAL &&traversal, size_t *chunk_size) {
     vid_t range_start =
@@ -339,6 +349,7 @@ bool sequence_v_view::next_chunk(TRAVERSAL &&traversal, size_t *chunk_size) {
     }
 
     vid_t range_end = range_start + *chunk_size;
+    // 遍历范围区间里的每个结点并执行操作
     for (vid_t range_i = range_start; range_i < range_end; ++range_i) {
         traversal(range_i);
     }

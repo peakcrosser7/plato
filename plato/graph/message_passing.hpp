@@ -336,6 +336,7 @@ R broadcast_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
     std::vector<R> reducer_vec(bc_opts.threads_, R());
     thread_local R *preducer;
 
+    // 每个激活结点发送消息的函数
     auto __send = [&](bc_send_callback_t<MSG> send) {
         auto send_callback = [&](const MSG &message) { send(message); };
 
@@ -349,6 +350,7 @@ R broadcast_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
         }
     };
 
+    // 接收消息
     auto __recv = [&](int p_i, bc_recv_pmsg_t<MSG> &pmsg) {
         *preducer += sink_task(p_i, *pmsg);
     };

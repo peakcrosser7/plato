@@ -176,6 +176,7 @@ class dualmode_engine_t {
     std::shared_ptr<INCOMING> in_edges_;
     /// @brief 存储出边的图结构(BCSR)
     std::shared_ptr<OUTGOING> out_edges_;
+    /// @brief 是否颠倒(转置)
     bool reversed_;
 
     /// @brief 图信息
@@ -208,6 +209,12 @@ __foreach_edges(PULL_SIGNAL&&, PULL_SLOT&&, GRAPH&) {
     return R();
 }
 
+/// @brief PUSH模式遍历每条边
+/// @param signal 消息发送函数
+/// @param slot 消息接受函数
+/// @param graph 图结构
+/// @param actives 激活结点数据
+/// @return 成功为0
 template <typename MSG, typename R, typename GRAPH, typename PUSH_SIGNAL,
           typename PUSH_SLOT>
 typename std::enable_if<!std::is_same<GRAPH, nullptr_t>::value, R>::type
@@ -220,6 +227,7 @@ __foreach_edges(PUSH_SIGNAL&& signal, PUSH_SLOT&& slot, GRAPH& graph,
                                      std::forward<PUSH_SLOT>(slot));
 }
 
+/// @brief PUSH模式遍历每条边
 template <typename MSG, typename R, typename GRAPH, typename PUSH_SIGNAL,
           typename PUSH_SLOT>
 typename std::enable_if<std::is_same<GRAPH, nullptr_t>::value, R>::type
@@ -282,6 +290,15 @@ dualmode_engine_t<INCOMING, OUTGOING>::alloc_v_subset(void) {
     return v_subset_t(graph_info_.max_v_i_ + 1);
 }
 
+/// @brief 
+/// @tparam INCOMING 
+/// @tparam OUTGOING 
+/// @param push_signal 
+/// @param push_slot 
+/// @param pull_signal 
+/// @param pull_slot 
+/// @param actives 激活结点数据
+/// @return 
 template <typename INCOMING, typename OUTGOING>
 template <typename MSG, typename R, typename PUSH_SIGNAL, typename PUSH_SLOT,
           typename PULL_SIGNAL, typename PULL_SLOT>
@@ -307,15 +324,17 @@ R dualmode_engine_t<INCOMING, OUTGOING>::foreach_edges(
         edges = edges * 2;
     }
 
+    // 此轮迭代全局激活边数
     eid_t active_edges = 0;
 
+    // 根据激活结点重置遍历
     out_degrees_->reset_traversal(
         std::shared_ptr<v_subset_t>(&actives, [](v_subset_t*) {}));
 #pragma omp parallel reduction(+ : active_edges)
     {
         size_t chunk_size = 4 * PAGESIZE;
         eid_t __active_edges = 0;
-
+        // 遍历激活结点的边统计激活的边数
         while (out_degrees_->next_chunk(
             [&](vid_t v_i, vid_t* degrees) {
                 __active_edges += (*degrees);
@@ -325,12 +344,14 @@ R dualmode_engine_t<INCOMING, OUTGOING>::foreach_edges(
         }
         active_edges += __active_edges;
     }
+    // 统计全局边数
     MPI_Allreduce(MPI_IN_PLACE, &active_edges, 1, get_mpi_data_type<eid_t>(),
                   MPI_SUM, MPI_COMM_WORLD);
 
+    // 根据激活边数的比例确定稀疏程度选择PUSH还是PULL
     bool is_sparse =
         ((double)active_edges / (double)edges) < opts_.push_threshold_;
-    if (is_sparse) {
+    if (is_sparse) {    // 稀疏选PUSH
 #ifdef __DUALMODE_DEBUG__
         if (0 == cluster_info.partition_id_) {
             LOG(INFO) << "active_edges: " << active_edges << "/" << edges << "("
@@ -367,16 +388,23 @@ R dualmode_engine_t<INCOMING, OUTGOING>::foreach_edges(PULL_SIGNAL&& signal,
     }
 }
 
+/// @brief 
+/// @tparam INCOMING 
+/// @tparam OUTGOING 
+/// @param signal 
+/// @param slot 
+/// @param actives 
+/// @return 
 template <typename INCOMING, typename OUTGOING>
 template <typename MSG, typename R, typename PUSH_SIGNAL, typename PUSH_SLOT>
 R dualmode_engine_t<INCOMING, OUTGOING>::foreach_edges(
     PUSH_SIGNAL&& signal, PUSH_SLOT&& slot,
     dualmode_engine_t<INCOMING, OUTGOING>::v_subset_t& actives) {
-    if (false == reversed_) {
+    if (false == reversed_) {   // 不颠倒沿出边
         return dualmode_detail::__foreach_edges<MSG, R, outgoing_graph_t>(
             std::forward<PUSH_SIGNAL>(signal), std::forward<PUSH_SLOT>(slot),
             *out_edges_, actives);
-    } else {
+    } else {    // 颠倒沿入边
         return dualmode_detail::__foreach_edges<MSG, R, incoming_graph_t>(
             std::forward<PUSH_SIGNAL>(signal), std::forward<PUSH_SLOT>(slot),
             *in_edges_, actives);
