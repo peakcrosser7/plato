@@ -72,7 +72,7 @@ vid_t breadth_first_search(INCOMING& in_edges, OUTGOING& out_edges,
     auto visited = engine.alloc_v_subset();     // 已访问结点位图
     auto active_current = engine.alloc_v_subset();  // 当前迭代的激活结点位图
     auto active_next = engine.alloc_v_subset();
-    auto parent = engine.template alloc_v_state<plato::vid_t>();
+    auto parent = engine.template alloc_v_state<plato::vid_t>();    // 结点父结点稠密数据
 
     // init structs
     plato::vid_t invalid_parent = graph_info.max_v_i_ + 1;  // 无效的父结点ID,用结点最大ID+1表示
@@ -95,43 +95,49 @@ vid_t breadth_first_search(INCOMING& in_edges, OUTGOING& out_edges,
         watch.mark("t1");
         active_next.clear();
 
+        // 遍历每条边得到新一轮激活结点数
         actives = engine.template foreach_edges<plato::vid_t, plato::vid_t>(
-            // 消息发送函数
+            // PUSH消息发送函数
             [&](const push_context_t& context, vid_t v_i) {
                 context.send(v_i);  // 发送当前结点ID
             },
-            // 消息接收函数
+            // PUSH消息接收函数
             [&](int /*p_i*/, plato::vid_t& msg) {
                 plato::vid_t activated = 0;
 
                 auto neighbours = out_edges.neighbours(msg);
+                // 遍历接收结点的(出度)邻接表
                 for (auto it = neighbours.begin_; neighbours.end_ != it; ++it) {
                     plato::vid_t dst = it->neighbour_;
-                    if ((parent[dst] == invalid_parent) &&
-                        (plato::cas(&parent[dst], invalid_parent, msg))) {
-                        active_next.set_bit(dst);
-                        visited.set_bit(dst);
-                        ++activated;
+                    if ((parent[dst] == invalid_parent) &&  // 没有父结点
+                        (plato::cas(&parent[dst], invalid_parent, msg))) {  // CAS设置父结点
+                        active_next.set_bit(dst);   // 激活当前结点
+                        visited.set_bit(dst);   // 设置为已访问
+                        ++activated;    // 激活结点数+1
                     }
                 }
                 return activated;
             },
+            // PULL消息发送函数
             [&](const pull_context_t& context, plato::vid_t v_i,
                 const adj_unit_list_spec_t& adjs) {
+                // 跳过已访问的结点
                 if (visited.get_bit(v_i)) {
                     return;
                 }
+                // 遍历结点的(入度)邻接表
                 for (auto it = adjs.begin_; adjs.end_ != it; ++it) {
                     plato::vid_t src = it->neighbour_;
-                    if (active_current.get_bit(src)) {
-                        context.send(pull_message_t{v_i, src});
+                    if (active_current.get_bit(src)) {  // 源结点此轮激活
+                        context.send(pull_message_t{v_i, src}); // 发送当前结点和源结点 
                         break;
                     }
                 }
             },
+            // PULL消息接收函数
             [&](int, pull_message_t& msg) {
                 if (plato::cas(&parent[msg.v_i_], invalid_parent,
-                               msg.message_)) {
+                               msg.message_)) { // 设置父结点
                     active_next.set_bit(msg.v_i_);
                     visited.set_bit(msg.v_i_);
                     return 1;
@@ -140,8 +146,10 @@ vid_t breadth_first_search(INCOMING& in_edges, OUTGOING& out_edges,
             },
             active_current);
 
+        // 新一轮激活结点的视图
         auto active_view = plato::create_active_v_view(
             out_edges.partitioner()->self_v_view(), active_next);
+        // 对新一轮激活结点进行统计
         plato::vid_t __actives =
             active_view.template foreach<plato::vid_t>([&](plato::vid_t v_i) {
                 visited.set_bit(v_i);
@@ -158,7 +166,9 @@ vid_t breadth_first_search(INCOMING& in_edges, OUTGOING& out_edges,
         }
     }
 
+    // BFS访问的结点结果全局同步
     visited.sync();
+    // BFS访问的结点个数
     return visited.count();
 }
 

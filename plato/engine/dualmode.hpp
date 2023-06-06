@@ -192,6 +192,11 @@ class dualmode_engine_t {
 
 namespace dualmode_detail {
 
+/// @brief PULL模式遍历每条边
+/// @param signal 消息发送函数
+/// @param slot 消息接收函数
+/// @param graph 图结构
+/// @return slot函数返回值归约结果
 template <typename MSG, typename R, typename GRAPH, typename PULL_SIGNAL,
           typename PULL_SLOT>
 typename std::enable_if<!std::is_same<GRAPH, nullptr_t>::value, R>::type
@@ -211,10 +216,10 @@ __foreach_edges(PULL_SIGNAL&&, PULL_SLOT&&, GRAPH&) {
 
 /// @brief PUSH模式遍历每条边
 /// @param signal 消息发送函数
-/// @param slot 消息接受函数
+/// @param slot 消息接收函数
 /// @param graph 图结构
 /// @param actives 激活结点数据
-/// @return 成功为0
+/// @return slot函数返回值归约结果
 template <typename MSG, typename R, typename GRAPH, typename PUSH_SIGNAL,
           typename PUSH_SLOT>
 typename std::enable_if<!std::is_same<GRAPH, nullptr_t>::value, R>::type
@@ -290,15 +295,13 @@ dualmode_engine_t<INCOMING, OUTGOING>::alloc_v_subset(void) {
     return v_subset_t(graph_info_.max_v_i_ + 1);
 }
 
-/// @brief 
-/// @tparam INCOMING 
-/// @tparam OUTGOING 
-/// @param push_signal 
-/// @param push_slot 
-/// @param pull_signal 
-/// @param pull_slot 
+/// @brief 根据激活边比例选择PUSH或PULL模式遍历每条边
+/// @param push_signal PUSH模式消息发送函数
+/// @param push_slot PUSH模式消息接收函数
+/// @param pull_signal PULL模式消息发送函数
+/// @param pull_slot PULL模式消息接收函数
 /// @param actives 激活结点数据
-/// @return 
+/// @return slot函数返回归约结果
 template <typename INCOMING, typename OUTGOING>
 template <typename MSG, typename R, typename PUSH_SIGNAL, typename PUSH_SLOT,
           typename PULL_SIGNAL, typename PULL_SLOT>
@@ -373,6 +376,10 @@ R dualmode_engine_t<INCOMING, OUTGOING>::foreach_edges(
     }
 }
 
+/// @brief PULL模式遍历每条边
+/// @param signal 消息发送函数
+/// @param slot 消息接收函数
+/// @return slot函数返回归约结果
 template <typename INCOMING, typename OUTGOING>
 template <typename MSG, typename R, typename PULL_SIGNAL, typename PULL_SLOT>
 R dualmode_engine_t<INCOMING, OUTGOING>::foreach_edges(PULL_SIGNAL&& signal,
@@ -388,13 +395,11 @@ R dualmode_engine_t<INCOMING, OUTGOING>::foreach_edges(PULL_SIGNAL&& signal,
     }
 }
 
-/// @brief 
-/// @tparam INCOMING 
-/// @tparam OUTGOING 
-/// @param signal 
-/// @param slot 
-/// @param actives 
-/// @return 
+/// @brief PUSH模式遍历每条边
+/// @param signal 消息发送函数
+/// @param slot 消息接收函数
+/// @param actives 激活结点数据
+/// @return slot函数返回归约结果
 template <typename INCOMING, typename OUTGOING>
 template <typename MSG, typename R, typename PUSH_SIGNAL, typename PUSH_SLOT>
 R dualmode_engine_t<INCOMING, OUTGOING>::foreach_edges(

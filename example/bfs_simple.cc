@@ -76,6 +76,7 @@ int main(int argc, char **argv) {
     opts.root_ = FLAGS_root;
 
     watch.mark("t0");
+    // 执行BFS算法得到访问结点数
     plato::vid_t visited = plato::algo::breadth_first_search(
         graph.second, graph.first, graph_info, opts);
 

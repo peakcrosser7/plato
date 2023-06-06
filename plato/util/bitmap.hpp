@@ -251,6 +251,7 @@ size_t bitmap_t<ALLOC>::count(void) const {
     return cnt;
 }
 
+/// @brief 全局同步
 template <typename ALLOC>
 void bitmap_t<ALLOC>::sync(void) {
     allreduce(MPI_IN_PLACE, data_, word_offset(size_) + 1,

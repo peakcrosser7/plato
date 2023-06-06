@@ -117,28 +117,41 @@ struct traversal_rebind_t {
 };
 
 /// @brief 绑定指定结点进行遍历操作
-/// @param func 待绑定函数
-/// @param bitmap 待绑定结点位图
+/// @param func 遍历函数
+/// @param bitmap 结点位图
 /// @return 遍历绑定类的对象
 template <typename F, typename BITMAP>
 traversal_rebind_t<F, BITMAP> bind_traversal(F&& func, BITMAP&& bitmap) {
     return {std::forward<F>(func), std::forward<BITMAP>(bitmap)};
 }
 
+/// @brief 归约绑定类型
+/// @tparam R 归约值类型
+/// @tparam F 归约函数类型
+/// @tparam BITMAP 位图类型
 template <typename R, typename F, typename BITMAP>
 struct reduction_rebind_t {
+    /// @brief 归约值
     R&& rdu_;
+    /// @brief 归约函数
     F func_;
+    /// @brief 结点位图
     BITMAP bitmap_;
 
     template <typename... Args>
     inline void operator()(vid_t v_i, Args... args) {
+        // 对位图中的有效结点执行归约操作
         if (bitmap_.get_bit(v_i)) {
             rdu_ += func_(v_i, std::forward<Args>(args)...);
         }
     }
 };
 
+/// @brief 绑定指定结点进行归约操作
+/// @param rdu 归约值
+/// @param func 归约函数
+/// @param bitmap 结点位图
+/// @return 归约绑定类的对象
 template <typename R, typename F, typename BITMAP>
 reduction_rebind_t<R, F, BITMAP> bind_reduction(R&& rdu, F&& func,
                                                 BITMAP&& bitmap) {
@@ -162,6 +175,9 @@ bool active_v_view<VIEW, BITMAP>::next_chunk(Func&& traversal,
         chunk_size);
 }
 
+/// @brief 并行遍历视图中的每个元素
+/// @param traversal 遍历归约函数
+/// @return 全局归约结果
 template <typename VIEW, typename BITMAP>
 template <typename R, typename PROCESS>
 R active_v_view<VIEW, BITMAP>::foreach (PROCESS&& traversal) {
@@ -172,6 +188,7 @@ R active_v_view<VIEW, BITMAP>::foreach (PROCESS&& traversal) {
     {
         R __rdu = R();
         size_t chunk_size = 4 * PAGESIZE;
+        // 遍历激活结点视图并归约
         auto __traversal = view_detail::bind_reduction(
             std::forward<R>(__rdu), std::forward<PROCESS>(traversal),
             std::forward<BITMAP>(bitmap_));
@@ -179,7 +196,7 @@ R active_v_view<VIEW, BITMAP>::foreach (PROCESS&& traversal) {
         }
         rdu += __traversal.rdu_;
     }
-
+    // 全局归约
     R grdu = R();
     MPI_Allreduce(&rdu, &grdu, 1, get_mpi_data_type<R>(), MPI_SUM,
                   MPI_COMM_WORLD);

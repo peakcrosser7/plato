@@ -115,6 +115,7 @@ R aggregate_message(
 
         mepa_ag_context_t<MSG> context{send_callback};
 
+        // 遍历每个结点并根据其邻接表生成消息
         auto traversal = [&](vid_t v_i,
                              const typename GRAPH::adj_unit_list_spec_t &adjs) {
             merge_task(context, v_i, adjs);
@@ -357,17 +358,20 @@ R broadcast_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
 
     actives.reset_traversal();
 
+    // 消息广播
     int rc = broadcast<MSG>(__send, __recv, bc_opts, [&](void) {
         preducer = &reducer_vec[omp_get_thread_num()];
     });
     CHECK(0 == rc);
 
     R reducer = R();
+    // 多线程归约
 #pragma omp parallel for reduction(+ : reducer)
     for (size_t i = 0; i < reducer_vec.size(); ++i) {
         reducer += reducer_vec[i];
     }
 
+    // 全局归约
     R global_reducer;
     MPI_Allreduce(&reducer, &global_reducer, 1, get_mpi_data_type<R>(), MPI_SUM,
                   MPI_COMM_WORLD);

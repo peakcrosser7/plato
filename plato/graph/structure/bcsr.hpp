@@ -271,12 +271,14 @@ bcsr_t<EDATA, PART_IMPL, ALLOC>::bcsr_t(bcsr_t&& other)
       traverse_range_(std::move(other.traverse_range_)),
       traverse_opts_(other.traverse_opts_) {}
 
+/// @brief 返回目标结点的本地邻接表
+/// @param v_i 结点ID
 template <typename EDATA, typename PART_IMPL, typename ALLOC>
 typename bcsr_t<EDATA, PART_IMPL, ALLOC>::adj_unit_list_spec_t
 bcsr_t<EDATA, PART_IMPL, ALLOC>::neighbours(vid_t v_i) {
     adj_unit_list_spec_t neis;
 
-    if (bitmap_->get_bit(v_i)) {
+    if (bitmap_->get_bit(v_i)) {    // 本地有效结点
         eid_t start_i = index_.get()[v_i];
         eid_t end_i = index_.get()[v_i + 1];
 
@@ -645,7 +647,7 @@ void bcsr_t<EDATA, PART_IMPL, ALLOC>::reset_traversal(
             traverse_range_.clear();
 
             if (is_seq_part<partition_t>()) {   // 只支持序列类型
-                int p_i =
+                int p_i =   // 当前节点的下一节点
                     (cluster_info.partition_id_ + 1) % cluster_info.partitions_;
 
                 do {

@@ -44,6 +44,11 @@ Copyright (c) 2015-2016 Xiaowei Zhu, Tsinghua University
 
 namespace plato {
 
+/// @brief Compare And Swap
+/// @param ptr 目标数据地址
+/// @param old_val 旧值
+/// @param new_val 新值
+/// @return 旧值
 template <class T>
 inline bool cas(T * ptr, T old_val, T new_val) {
   if (sizeof(T) == 8) {
