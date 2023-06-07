@@ -27,12 +27,12 @@
 #include "plato/util/atomic.hpp"
 #include "plato/graph/graph.hpp"
 
-DEFINE_string(input, "", "input file, in csv format, without edge data");
-DEFINE_bool(is_directed, false, "is graph directed or not");
-DEFINE_uint32(root, 0, "start bfs from which vertex");
-DEFINE_int32(alpha, -1, "alpha value used in sequence balance partition");
-DEFINE_bool(part_by_in, false, "partition by in-degree");
-DEFINE_uint32(type, 0, "0 -- always pull, 1 -- push-pull, else -- push");
+DEFINE_string(input,       "",     "input file, in csv format, without edge data");
+DEFINE_bool(is_directed,   false,  "is graph directed or not");
+DEFINE_uint32(root,        0,      "start bfs from which vertex");
+DEFINE_int32(alpha,        -1,     "alpha value used in sequence balance partition");
+DEFINE_bool(part_by_in,    false,  "partition by in-degree");
+DEFINE_uint32(type,        0,      "0 -- always pull, 1 -- push-pull, else -- push");
 
 bool string_not_empty(const char *, const std::string &value) {
     if (0 == value.length()) {
@@ -48,15 +48,11 @@ void init(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-    using bcsr_spec_t =
-        plato::bcsr_t<plato::empty_t,
-                      plato::sequence_balanced_by_destination_t>;
-    using dcsc_spec_t =
-        plato::dcsc_t<plato::empty_t, plato::sequence_balanced_by_source_t>;
-    using partition_bcsr_t = bcsr_spec_t::partition_t;
-    using state_parent_t = plato::dense_state_t<plato::vid_t, partition_bcsr_t>;
-    using bitmap_spec_t = plato::bitmap_t<>;
-    using adj_unit_list_spec_t = bcsr_spec_t::adj_unit_list_spec_t;
+  using bcsr_spec_t          = plato::bcsr_t<plato::empty_t, plato::sequence_balanced_by_destination_t>;
+  using dcsc_spec_t          = plato::dcsc_t<plato::empty_t, plato::sequence_balanced_by_source_t>;
+  using partition_bcsr_t     = bcsr_spec_t::partition_t;
+  using state_parent_t       = plato::dense_state_t<plato::vid_t, partition_bcsr_t>;
+  using bitmap_spec_t        = plato::bitmap_t<>;
 
     plato::stop_watch_t watch;
     auto &cluster_info = plato::cluster_info_t::get_instance();
