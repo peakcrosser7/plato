@@ -264,6 +264,7 @@ class sequence_balanced_by_destination_t {
         abort();
     }
 
+    /// @brief 返回本地节点的结点分区视图
     sequence_v_view self_v_view(void) {
         auto &cluster_info = cluster_info_t::get_instance();
         return sequence_v_view(offset_[cluster_info.partition_id_],
