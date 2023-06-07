@@ -302,7 +302,9 @@ protected:
 
 /***************************************************************************/
 
+/// @brief 空输出流
 struct empty_ostream_t {
+  /// @brief 输出的字节数
   size_t size_;
 
   empty_ostream_t() : size_(0) {}
@@ -313,27 +315,31 @@ struct empty_ostream_t {
   empty_ostream_t& operator=(empty_ostream_t&&) = delete;
 
   /**
-   * @brief
+   * @brief 已输出的字节数
    * @return
    */
   size_t size(void) const { return size_; }
 
   /**
-   * @brief
+   * @brief 写入数据
    * @tparam T
    * @param size
    * @return
    */
   template<typename T>
   std::size_t write(const T*, std::size_t size) {
-    size_ += size;
+    size_ += size;   // 只更新写入字节数
     return size;
   }
 };
 
+/// @brief 内存简式输出流
 struct mem_simple_ostream_t {
+  /// @brief 输出流内存起点
   char* beg_;
+  /// @brief 输出流当前位置
   char* cur_;
+  /// @brief 输出流内存终点
   char* end_;
 
   mem_simple_ostream_t(char* beg, size_t capacity) :
@@ -348,17 +354,17 @@ struct mem_simple_ostream_t {
   mem_simple_ostream_t& operator=(mem_simple_ostream_t&&) = delete;
 
   /**
-   * @brief
+   * @brief 大小(已输出字节数)
    * @return
    */
   size_t size(void) const { return cur_ - beg_; }
 
   /**
-   * @brief
+   * @brief 写入数据
    * @tparam T
    * @param tptr
    * @param size
-   * @return
+   * @return 写入的字节数
    */
   template<typename T>
   std::size_t write(const T* tptr, std::size_t size) {

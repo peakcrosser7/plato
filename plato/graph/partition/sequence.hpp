@@ -107,8 +107,9 @@ void __check_consistency(const std::vector<vid_t> &offset_) {
 /// @brief 序列划分视图 sequence partition view
 class sequence_v_view {
   public:
-    // *******************************************************************************
-    // // required types & methods
+
+    // ******************************************************************************* //
+    // required types & methods
 
     // traverse related
     void reset_traversal(const traverse_opts_t &opts = traverse_opts_t());
@@ -119,14 +120,12 @@ class sequence_v_view {
      * \tparam TRAVERSAL  traversal functor, it should implement the method:
      *                    <tt>void operator() (vid_t)<\tt>;
      *
-     * \return true - traverse at lease one edge, false - no more edges to
-     *traverse.
+   * \return true - traverse at lease one edge, false - no more edges to traverse.
      **/
     template <typename TRAVERSAL>
     bool next_chunk(TRAVERSAL &&traversal, size_t *chunk_size);
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* //
 
     sequence_v_view(const sequence_v_view &) = delete;
     sequence_v_view &operator=(const sequence_v_view &) = delete;
@@ -162,8 +161,9 @@ class sequence_v_view {
 /// @brief 根据边的源结点的划分序列
 class sequence_balanced_by_source_t {
   public:
-    // *******************************************************************************
-    // // required types & methods
+
+    // ******************************************************************************* //
+    // required types & methods
 
     // get edge's partition
     /// @brief  根据源结点获取边所在的子图分区(集群节点) get edge's partition
@@ -197,8 +197,7 @@ class sequence_balanced_by_source_t {
                                offset_[cluster_info.partition_id_ + 1]);
     }
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* //
 
     /*
      * constructor
@@ -224,22 +223,20 @@ class sequence_balanced_by_source_t {
 
     void check_consistency(void) { __check_consistency(offset_); }
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* // 
 
     /// @brief 集群节点对应的结点偏移量数组
     std::vector<vid_t> offset_;
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* // 
 };
 
 // edge belong to destination node's partition
 /// @brief 根据边的终结点的划分序列
 class sequence_balanced_by_destination_t {
   public:
-    // *******************************************************************************
-    // // required types & methods
+    // ******************************************************************************* //
+    // required types & methods
 
     /// @brief  根据终结点获取边所在的子图分区(集群节点) get edge's partition
     /// @param src 源结点
@@ -271,8 +268,7 @@ class sequence_balanced_by_destination_t {
                                offset_[cluster_info.partition_id_ + 1]);
     }
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* //
 
     /*
      * constructor
@@ -299,14 +295,12 @@ class sequence_balanced_by_destination_t {
     /// @brief 检查结点偏移量数组offset_的集群全局一致性
     void check_consistency(void) { __check_consistency(offset_); }
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* //
 
     /// @brief 集群节点对应的结点偏移量数组
     std::vector<vid_t> offset_;
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* //
 };
 
 /// @brief 判断子图分区类型是否是序列类型(有记录集群节点对应的结点范围的数组)
@@ -316,8 +310,8 @@ template <typename PART> constexpr bool is_seq_part(void) {
            std::is_same<PART, sequence_balanced_by_destination_t>::value;
 }
 
-// ************************************************************************************
-// // implementations
+// ************************************************************************************ //
+// implementations
 
 sequence_v_view::sequence_v_view(vid_t start, vid_t end)
     : start_(start), end_(end), traverse_i_(start_) {}
@@ -357,8 +351,7 @@ bool sequence_v_view::next_chunk(TRAVERSAL &&traversal, size_t *chunk_size) {
     return true;
 }
 
-// ************************************************************************************
-// //
+// ************************************************************************************ //
 
 } // namespace plato
 

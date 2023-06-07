@@ -129,7 +129,7 @@ int main(int argc, char **argv) {
             active_edges = 0;
             if (1 == FLAGS_type) {  // PULL
                 out_degrees.reset_traversal(active_current);
-#pragma omp parallel reduction(+ : active_edges)
+                #pragma omp parallel reduction(+ : active_edges)
                 {
                     size_t chunk_size = 4 * PAGESIZE;
                     plato::eid_t __active_edges = 0;

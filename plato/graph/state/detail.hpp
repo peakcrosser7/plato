@@ -60,7 +60,8 @@ R __foreach (
   std::shared_ptr<bitmap_spec_t> p_bitmap(bitmap, [](bitmap_spec_t*) { });
   auto& cluster_info = cluster_info_t::get_instance();
 
-  state->reset_traversal(p_bitmap);
+  state->reset_traversal(p_bitmap); // 重置遍历
+  // 并行处理每个结点并归约
   #pragma omp parallel reduction(+:r_reduce) num_threads(cluster_info.threads_)
   {
     size_t __chunk_size = chunk_size;
@@ -72,7 +73,7 @@ R __foreach (
 
     r_reduce += l_reduce;
   }
-
+  // 全局归约
   R g_reduce = R();
   MPI_Allreduce(&r_reduce, &g_reduce, 1, get_mpi_data_type<R>(), MPI_SUM, MPI_COMM_WORLD);
   return g_reduce;

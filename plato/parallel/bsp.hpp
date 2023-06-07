@@ -734,7 +734,7 @@ int fine_grain_bsp(
     
     // 接收请求线程
     std::thread recv_thread([&](void) {
-#pragma omp parallel num_threads(opts.threads_)
+        #pragma omp parallel num_threads(opts.threads_)
         {
             auto yeild = [&](bool inc, bool should_sleep) {
                 if (inc) {
@@ -915,7 +915,7 @@ int fine_grain_bsp(
             }
         });
 
-#pragma omp parallel num_threads(opts.threads_)
+    #pragma omp parallel num_threads(opts.threads_)
     {
         // 每个节点的序列化数据
         std::vector<std::shared_ptr<oarchive_spec_t>> oarchives_vec(

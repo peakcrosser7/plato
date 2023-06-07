@@ -37,6 +37,7 @@ class background_executor : public std::enable_shared_from_this<background_execu
   std::condition_variable cv_;
   bool flushing_ = false;
   std::list<std::thread> threads_;
+  /// @brief 最大线程数
   size_t max_threads_;
 public:
   background_executor(const background_executor&) = delete;

@@ -33,7 +33,9 @@
 
 namespace plato {
 
+/// @brief 临时文件类型
 class temporary_file_t {
+  /// @brief 临时文件的文件描述符
   int fd_ = -1;
 public:
   temporary_file_t(const temporary_file_t&) noexcept = delete;
@@ -47,6 +49,8 @@ public:
     return *this;
   }
 
+  /// @brief 构造函数
+  /// @param cache_dir 临时文件目录
   temporary_file_t(std::string cache_dir = ".cache/") {
     if (!boost::filesystem::exists(cache_dir)) {
       boost::filesystem::create_directories(cache_dir);
@@ -54,6 +58,7 @@ public:
     CHECK(boost::filesystem::is_directory(cache_dir));
 
     std::string tmp_name = (boost::format("%s/XXXXXX") % cache_dir).str();
+    // 创建临时文件并打开
     fd_ = mkstemp64(const_cast<char*>(tmp_name.c_str()));
     CHECK(-1 != fd_) << boost::format("WARNING: mkstemp failed, err code: %d, err msg: %s") % errno % strerror(errno);
     CHECK(-1 != unlink(tmp_name.c_str())) << boost::format("WARNING: unlink failed, err code: %d, err msg: %s") % errno % strerror(errno);

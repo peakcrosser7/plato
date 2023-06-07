@@ -59,8 +59,7 @@ template <typename EDATA, typename PART_IMPL,
           typename ALLOC = std::allocator<adj_unit_t<EDATA>>>
 class dcsc_t {
   private:
-    using traits_ = typename std::allocator_traits<
-        ALLOC>::template rebind_traits<adj_unit_t<EDATA>>;
+    using traits_ = typename std::allocator_traits<ALLOC>::template rebind_traits<adj_unit_t<EDATA>>;
 
   public:
     // *******************************************************************************
@@ -91,8 +90,7 @@ class dcsc_t {
     std::shared_ptr<partition_t> partitioner(void) { return partitioner_; }
 
     // traverse interface
-    using traversal_t =
-        std::function<bool(vid_t v_i, const adj_unit_list_spec_t &)>;
+    using traversal_t = std::function<bool(vid_t v_i, const adj_unit_list_spec_t &)>;
 
     /*
      * reset traversal location to start
@@ -133,22 +131,19 @@ class dcsc_t {
     eid_t edges(void) { return edges_; }
 
   protected:
-    using adjs_allocator_t =
-        typename traits_::template rebind_alloc<adj_unit_spec_t>;
-    using adjs_traits_ =
-        typename traits_::template rebind_traits<adj_unit_spec_t>;
-    using adjs_pointer = typename adjs_traits_::pointer;
+    using adjs_allocator_t = typename traits_::template rebind_alloc<adj_unit_spec_t>;
+    using adjs_traits_     = typename traits_::template rebind_traits<adj_unit_spec_t>;
+    using adjs_pointer     = typename adjs_traits_::pointer;
 
     using index_allocator_t = typename traits_::template rebind_alloc<eid_t>;
-    using index_traits_ = typename traits_::template rebind_traits<eid_t>;
-    using index_pointer = typename index_traits_::pointer;
+    using index_traits_     = typename traits_::template rebind_traits<eid_t>;
+    using index_pointer     = typename index_traits_::pointer;
 
-    using local_vertex_allocator_t =
-        typename traits_::template rebind_alloc<vid_t>;
-    using local_vertex_traits_ =
-        typename traits_::template rebind_traits<vid_t>;
-    using local_vertex_pointer = typename local_vertex_traits_::pointer;
 
+    using local_vertex_allocator_t = typename traits_::template rebind_alloc<vid_t>;
+    using local_vertex_traits_     = typename traits_::template rebind_traits<vid_t>;
+    using local_vertex_pointer     = typename local_vertex_traits_::pointer;
+    
     /// @brief 节点本地数据子图结点数
     vid_t vertices_;
     /// @brief 节点本地数据子图边数
@@ -219,8 +214,8 @@ class dcsc_t {
             foreach_edges);
 };
 
-// ************************************************************************************
-// // implementations
+// ************************************************************************************ // 
+// implementations
 
 template <typename EDATA, typename PART_IMPL, typename ALLOC>
 dcsc_t<EDATA, PART_IMPL, ALLOC>::dcsc_t(
@@ -405,10 +400,16 @@ int dcsc_t<EDATA, PART_IMPL, ALLOC>::load_from_traversal(
     return 0;
 }
 
+/// @brief 通过缓存加载边信息
+/// @param graph_info 图信息
+/// @param cache 边缓存
+/// @return 成功为0, 反之非0
 template <typename EDATA, typename PART_IMPL, typename ALLOC>
 template <typename EDGE_CACHE>
 int dcsc_t<EDATA, PART_IMPL, ALLOC>::load_from_cache(
     const graph_info_t &graph_info, EDGE_CACHE &cache) {
+
+    // 重置遍历的函数
     auto reset_traversal = [&](bool auto_release_ = false) {
         traverse_opts_t opts;
         opts.mode_ = traverse_mode_t::RANDOM;
@@ -416,11 +417,12 @@ int dcsc_t<EDATA, PART_IMPL, ALLOC>::load_from_cache(
         cache.reset_traversal(opts);
     };
 
+    // 遍历边缓存将每条边的终点发送到相应集群节点
     auto foreach_dests = [&](bsp_send_callback_t<vid_t> send) {
         auto traversal = [&](size_t, edge_unit_spec_t *edge) {
             CHECK(edge->src_ < graph_info.vertices_);
             CHECK(edge->dst_ < graph_info.vertices_);
-
+            // 将边的终结点发送给边(源结点)所在分区对应的集群节点
             send(partitioner_->get_partition_id(edge->src_, edge->dst_),
                  edge->dst_);
             if (false == graph_info.is_directed_) { // cache friendly
@@ -431,12 +433,13 @@ int dcsc_t<EDATA, PART_IMPL, ALLOC>::load_from_cache(
         };
 
         size_t chunk_size = 64;
-        while (cache.next_chunk(traversal, &chunk_size)) {
-        }
+        while (cache.next_chunk(traversal, &chunk_size)) {}
     };
 
+    // 遍历边缓存将边信息发送至对应集群节点
     auto foreach_edges = [&](bsp_send_callback_t<edge_unit_spec_t> send) {
         auto traversal = [&](size_t, edge_unit_spec_t *edge) {
+            // 发送边信息到子图对应的集群节点
             send(partitioner_->get_partition_id(edge->src_, edge->dst_), *edge);
             if (false == graph_info.is_directed_) { // cache friendly
                 auto reversed_edge = *edge;
@@ -673,8 +676,7 @@ bool dcsc_t<EDATA, PART_IMPL, ALLOC>::next_chunk(traversal_t traversal,
     return true;
 }
 
-// ************************************************************************************
-// //
+// ************************************************************************************ //
 
 } // namespace plato
 

@@ -41,7 +41,7 @@ public:
     mmap_allocator_t<edge_unit_t<EDATA, VID_T>>>(n) { }
 };
 
-// thread-safe edge block cache implementation, fixed capacity, can save memory
+/// @brief 边的内存分块缓存 thread-safe edge block cache implementation, fixed capacity, can save memory
 template <typename EDATA, typename VID_T = vid_t>
 class edge_block_cache_t
   : public object_block_buffer_t<edge_unit_t<EDATA, VID_T>> {
@@ -55,7 +55,7 @@ public:
     object_buffer_t<edge_unit_t<EDATA, VID_T>>(block_num, block_size) { }
 };
 
-// thread-safe edge cache implementation, fixed capacity
+/// @brief 边的文件缓存 thread-safe edge cache implementation, fixed capacity
 template <typename EDATA, typename VID_T = vid_t>
 class edge_file_cache_t : public object_file_buffer_t<edge_unit_t<EDATA, VID_T>> {
 public:

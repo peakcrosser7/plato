@@ -36,13 +36,18 @@
 
 namespace plato { namespace algo {
 
+/// @brief PageRank选项
 struct pagerank_opts_t {
-  uint32_t iteration_ = 100;   // number of iterations
-  double   damping_   = 0.85;  // the damping factor
-  double   eps_       = 0.001; // the calculation will be considered complete if the sum of
-                              // the difference of the 'rank' value between iterations 
-                              // changes less than 'eps'. if 'eps' equals to 0, pagerank will be
-                              // force to execute 'iteration' epochs.
+  /// @brief 迭代次数 number of iterations
+  uint32_t iteration_ = 100;
+  /// @brief 阻尼系数 the damping factor
+  double   damping_   = 0.85;
+  /// @brief epsilon 收敛差值
+  /// the calculation will be considered complete if the sum of
+  /// the difference of the 'rank' value between iterations 
+  /// changes less than 'eps'. if 'eps' equals to 0, pagerank will be
+  /// force to execute 'iteration' epochs.
+  double   eps_       = 0.001; 
 };
 
 /*
@@ -78,35 +83,46 @@ dense_state_t<double, typename GRAPH::partition_t> pagerank (
       graph_info
   );
 
+  // 此轮迭代结点rank值稠密数据
   rank_state_t curt_rank = engine.template alloc_v_state<double>();
+  // 下一轮迭代结点rank值稠密数据
   rank_state_t next_rank = engine.template alloc_v_state<double>();
 
   watch.mark("t1");
+  // 结点出度稠密数据
   auto odegrees = plato::generate_dense_out_degrees_fg<uint32_t>(graph_info, graph, false);
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "generate out-degrees from graph cost: " << watch.show("t1") / 1000.0 << "s";
   }
 
+  // 两轮PageRank值的差值(初始化为1.)
   double delta = curt_rank.template foreach<double> (
     [&](plato::vid_t v_i, double* pval) {
       *pval = 1.0;
       if (odegrees[v_i] > 0) {
+        // 初始化结点PageRank值为\frac{1}{OutDegree(v_i)}
         *pval = *pval / odegrees[v_i];
       }
       return 1.0;
     }
   );
 
+  // 迭代指定轮数
   for (uint32_t epoch_i = 0; epoch_i < opts.iteration_; ++epoch_i) {
     watch.mark("t1");
 
-    next_rank.fill(0.0);
+    next_rank.fill(0.0);  // 初始化下一轮迭代PageRank值为0.
+    // PULL模式遍历每条边
     engine.template foreach_edges<double, int> (
+      // 消息发送函数
       [&](const context_spec_t& context, plato::vid_t v_i, const adj_unit_list_spec_t& adjs) {
         double rank_sum = 0.0;
+        // 遍历每个入度邻结点
         for (auto it = adjs.begin_; adjs.end_ != it; ++it) {
+          // 邻结点此轮PageRank值之和
           rank_sum += curt_rank[it->neighbour_];
         }
+        // 发送结点和PageRank值
         context.send(message_spec_t { v_i, rank_sum });
       },
       [&](int, message_spec_t& msg) {

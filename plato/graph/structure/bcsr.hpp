@@ -74,8 +74,8 @@ class bcsr_t {
    public:
     using bitmap_spec_t = bitmap_t<ALLOC>;
 
-    // *******************************************************************************
-    // // required types & methods
+    // ******************************************************************************* // 
+    // required types & methods
 
     using edata_t = EDATA;
     using partition_t = PART_IMPL;
@@ -134,8 +134,7 @@ class bcsr_t {
      * */
     bool next_chunk(traversal_t traversal, size_t* chunk_size);
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* //
 
     bcsr_t(std::shared_ptr<PART_IMPL> partitioner,
            const allocator_type& alloc = ALLOC());
@@ -246,8 +245,8 @@ class bcsr_t {
             foreach_edges);
 };
 
-// ************************************************************************************
-// // implementations
+// ************************************************************************************ //
+// implementations
 
 template <typename EDATA, typename PART_IMPL, typename ALLOC>
 bcsr_t<EDATA, PART_IMPL, ALLOC>::bcsr_t(std::shared_ptr<PART_IMPL> partitioner,
@@ -476,7 +475,7 @@ int bcsr_t<EDATA, PART_IMPL, ALLOC>::load_from_cache(
 
             if (graph_info.is_directed_) {  // 有向图
                 if (is_outgoing) {  // 出边方向
-                    // 将边的源结点发送给边所在分区对应的集群节点
+                    // 将边的源结点发送给边(终结点)所在分区对应的集群节点
                     send(partitioner_->get_partition_id(edge->src_, edge->dst_),
                          edge->src_);
                 } else {    // 入边方向
@@ -493,8 +492,7 @@ int bcsr_t<EDATA, PART_IMPL, ALLOC>::load_from_cache(
         };
 
         size_t chunk_size = 64;
-        while (cache.next_chunk(traversal, &chunk_size)) {
-        }
+        while (cache.next_chunk(traversal, &chunk_size)) {}
     };
 
     // 遍历边缓存将边信息发送至对应集群节点

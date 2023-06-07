@@ -48,9 +48,12 @@
 
 namespace plato {
 
+/// @brief 对象缓存选项
 struct object_buffer_opt_t {
+    /// @brief 
     size_t capacity_ = 0;
     std::string prefix_;
+    /// @brief 临时文件路径
     std::string path_ = ".cache";
 };
 
@@ -61,8 +64,9 @@ struct object_buffer_opt_t {
 template <typename T, typename ALLOC = std::allocator<T>>
 class object_buffer_t {
   public:
-    // *******************************************************************************
-    // // required types & methods
+
+    // ******************************************************************************* // 
+    // required types & methods
 
     using object_t = T;
     using allocator_type = ALLOC;
@@ -144,8 +148,7 @@ class object_buffer_t {
     template <typename Traversal>
     bool next_chunk(Traversal &&traversal, size_t *chunk_size);
 
-    // ********************* end of required types & methods
-    // ************************** //
+    // ********************* end of required types & methods ************************** //
 
     /**
      * @brief set capacity of the buffer to half of the system's memory
@@ -192,8 +195,8 @@ class object_buffer_t {
     std::vector<std::pair<size_t, size_t>> traverse_range_;
 };
 
-// *******************************************************************************
-// // implementations
+// ******************************************************************************* // 
+// implementations
 
 template <typename T, typename ALLOC>
 object_buffer_t<T, ALLOC>::object_buffer_t(void)
@@ -637,8 +640,7 @@ bool object_block_buffer_t<T>::next_chunk(Traversal &&traversal,
     return true;
 }
 
-// *******************************************************************************
-// //
+// ******************************************************************************* //
 
 namespace object_buffer_detail {
 
@@ -749,11 +751,13 @@ template <typename T> struct traverse_unit {
 
 } // namespace object_buffer_detail
 
-// *******************************************************************************
-// //
+// ******************************************************************************* //
 
-// fixed-size, object file buffer with thread-safe traversal
-template <typename T, typename Enable = void> class object_file_buffer_t {
+/// @brief 对象的文件缓存 fixed-size, object file buffer with thread-safe traversal
+/// @tparam T 
+/// @tparam Enable 
+template <typename T, typename Enable = void> 
+class object_file_buffer_t {
     constexpr static size_t mmap_unit_capacity = 32 * MBYTES;
 
   public:
@@ -786,8 +790,7 @@ template <typename T, typename Enable = void> class object_file_buffer_t {
     template <typename Traversal>
     bool next_chunk(Traversal &&traversal, size_t *chunk_size);
 
-    // ********************* end of required types & methods
-    // ************************** //
+    // ********************* end of required types & methods ************************** //
     object_file_buffer_t(size_t capacity = 0,
                          std::string cache_dir = ".cache/");
 
@@ -802,9 +805,12 @@ template <typename T, typename Enable = void> class object_file_buffer_t {
     constexpr static bool is_trivial() { return std::is_trivial<T>::value; }
 
   protected:
+    /// @brief 文件容量
     size_t capacity_;
     size_t size_;
+    /// @brief 临时文件
     temporary_file_t file_;
+    /// @brief 基于mmap的缓冲区
     std::shared_ptr<char> base_;
 
     std::shared_ptr<background_executor> bio_;
@@ -815,8 +821,8 @@ template <typename T, typename Enable = void> class object_file_buffer_t {
     bool traverse_direction_;
 };
 
-// *******************************************************************************
-// // implementations
+// ******************************************************************************* //
+// implementations
 
 template <typename T, typename Enable>
 object_file_buffer_t<T, Enable>::object_file_buffer_t(size_t capacity,
@@ -830,11 +836,12 @@ object_file_buffer_t<T, Enable>::object_file_buffer_t(size_t capacity,
     }
     capacity_ = capacity;
     CHECK(capacity_);
-
+    // 截断文件大小
     CHECK(-1 != ftruncate64(file_.fd(), capacity_))
         << boost::format(
                "WARNING: ftruncate64 failed, err code: %d, err msg: %s") %
                errno % strerror(errno);
+    // 将文件的缓冲区中的数据写入到磁盘中
     CHECK(-1 != fsync(file_.fd()))
         << boost::format("WARNING: fsync failed, err code: %d, err msg: %s") %
                errno % strerror(errno);
@@ -1016,8 +1023,7 @@ bool object_file_buffer_t<T, Enable>::next_chunk(Traversal &&traversal,
     return true;
 }
 
-// *******************************************************************************
-// //
+// ******************************************************************************* //
 
 // fixed-size, object file buffer with thread-safe traversal
 template <typename T>
@@ -1054,8 +1060,7 @@ class object_file_buffer_t<
     template <typename Traversal>
     bool next_chunk(Traversal &&traversal, size_t *chunk_size);
 
-    // ********************* end of required types & methods
-    // ************************** //
+    // ********************* end of required types & methods ************************** //
     explicit object_file_buffer_t(size_t capacity = 0,
                                   std::string cache_dir = ".cache/");
 
@@ -1082,8 +1087,8 @@ class object_file_buffer_t<
     bool traverse_direction_;
 };
 
-// *******************************************************************************
-// // implementations
+// ******************************************************************************* // 
+// implementations
 
 template <typename T>
 object_file_buffer_t<T,
@@ -1251,8 +1256,7 @@ bool object_file_buffer_t<
     return true;
 }
 
-// *******************************************************************************
-// //
+// ******************************************************************************* //
 
 namespace object_buffer_detail {
 

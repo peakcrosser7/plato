@@ -83,6 +83,7 @@ struct partition_traits<
 
 }  // namespace dualmode_detail
 
+/// @brief 双模式引擎
 template <typename INCOMING, typename OUTGOING>
 class dualmode_engine_t {
    public:
@@ -90,8 +91,7 @@ class dualmode_engine_t {
     using outgoing_graph_t = OUTGOING;
 
     // TODO we'd better seperate vertex's partition from edge partition
-    using partition_t =
-        typename dualmode_detail::partition_traits<INCOMING, OUTGOING>::type;
+    using partition_t = typename dualmode_detail::partition_traits<INCOMING, OUTGOING>::type;
 
     template <typename T>
     using v_state_t = dense_state_t<T, partition_t>;
@@ -120,8 +120,7 @@ class dualmode_engine_t {
 
     // transpose the graph
     // INCOMING and OUTGOING must have same type, and support std::swap
-    // std::enable_if<std::is_same<INCOMING, OUTGOING>::value, void>
-    //   transpose(void);
+    // std::enable_if<std::is_same<INCOMING, OUTGOING>::value, void> transpose(void);
 
     /*
      * foreach edges in the graph, engine will switch between push-pull mode
@@ -168,8 +167,7 @@ class dualmode_engine_t {
     void reverse(void) { reversed_ = !reversed_; }
     bool is_reversed(void) { return reversed_; }
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* //
 
    protected:
     /// @brief 存储入边的图结构(DCSC)

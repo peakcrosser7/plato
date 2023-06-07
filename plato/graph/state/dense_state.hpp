@@ -123,8 +123,7 @@ class dense_state_t {
     R foreach (PROCESS&& process, bitmap_spec_t* pactives = nullptr,
                size_t chunk_size = PAGESIZE);
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* //
 
     /*
      * constructor
@@ -207,8 +206,8 @@ class dense_state_t {
     }
 };
 
-// ************************************************************************************
-// // implementations
+// ************************************************************************************ //
+// implementations
 
 template <typename T, typename PART_IMPL, typename ALLOC, typename BITMAP>
 dense_state_t<T, PART_IMPL, ALLOC, BITMAP>::dense_state_t(
@@ -516,6 +515,11 @@ bool dense_state_t<T, PART_IMPL, ALLOC, BITMAP>::next_chunk(
     return true;
 }
 
+/// @brief 遍历每个激活结点的数据
+/// @param process 处理函数
+/// @param pactives 激活结点位图
+/// @param chunk_size 分块大小
+/// @return 处理函数的归约值
 template <typename T, typename PART_IMPL, typename ALLOC, typename BITMAP>
 template <typename R, typename PROCESS>
 R dense_state_t<T, PART_IMPL, ALLOC, BITMAP>::foreach (PROCESS&& process,
@@ -525,8 +529,7 @@ R dense_state_t<T, PART_IMPL, ALLOC, BITMAP>::foreach (PROCESS&& process,
                         chunk_size);
 }
 
-// ************************************************************************************
-// //
+// ************************************************************************************ //
 
 }  // namespace plato
 
