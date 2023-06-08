@@ -177,11 +177,13 @@ using mepa_sd_sink_t = std::function<R(MSG &)>;
 namespace {
 
 /// @brief 绑定的发送任务
-/// @tparam F 发送函数类型
-/// @tparam T 发送的值类型
+/// @tparam F operator()遍历调用函数类型
+/// @tparam T 调用参数类型
 template <typename F, typename T> 
 struct rebind_send_task {
+    /// @brief operator()遍历调用函数
     F func;
+    /// @brief 调用参数
     T v;
 
     template <typename... Args>

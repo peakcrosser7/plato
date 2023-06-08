@@ -632,6 +632,7 @@ int broadcast(
                     {
                         int p_i = (cluster_info.partition_id_ + 1) %
                                   cluster_info.partitions_;
+                        // 将请求以循环次序发送给下一分区节点
                         for (auto& req : flying_requests_list.back().first) {
                             MPI_Isend(buff.data_, buff.size_, MPI_CHAR, p_i,
                                       Shuffle, MPI_COMM_WORLD, &req);
