@@ -135,8 +135,8 @@ inline int shuffle(shuffle_send_task_t<MSG_T> send_task,
     std::thread recv_thread([&](void) {
         // 完成的接受请求数
         volatile int finished_count = 0;
-// 启动多个线程接收
-#pragma omp parallel num_threads(sf_ops.recv_threads_)
+        // 启动多个线程接收
+        #pragma omp parallel num_threads(sf_ops.recv_threads_)
         {
             const uint64_t buff_size = 2UL * 1024UL * (uint64_t)MBYTES - 1;
             // 记录正在接收的通信请求句柄(非阻塞的动态缓存)的列表
@@ -231,8 +231,8 @@ inline int shuffle(shuffle_send_task_t<MSG_T> send_task,
         }
     });
 
-//  send tasks
-#pragma omp parallel num_threads(sf_ops.send_threads_)
+    //  send tasks
+    #pragma omp parallel num_threads(sf_ops.send_threads_)
     {
         // 集群每个节点所具有的序列化对象列表的数组
         std::vector<std::list<std::shared_ptr<oarchive_spec_t>>> oarchives_vec(

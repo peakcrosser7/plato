@@ -47,8 +47,8 @@ struct active_v_view {
     /// @brief 激活结点位图
     BITMAP bitmap_;
 
-    // *******************************************************************************
-    // // required types & methods
+    // ******************************************************************************* //
+    // required types & methods
 
     // traverse related
     inline void reset_traversal(
@@ -71,8 +71,7 @@ struct active_v_view {
     template <typename R, typename PROCESS>
     R foreach (PROCESS&& traversal);
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* //
 };
 
 /// @brief 创建激活结点视图
@@ -85,8 +84,8 @@ inline active_v_view<VIEW, BITMAP> create_active_v_view(VIEW&& view,
     return {std::forward<VIEW>(view), std::forward<BITMAP>(bitmap)};
 }
 
-// ************************************************************************************
-// // implementations
+// ************************************************************************************ //
+// implementations
 
 /// @brief 重置遍历
 /// @param opts 遍历选项
@@ -203,8 +202,7 @@ R active_v_view<VIEW, BITMAP>::foreach (PROCESS&& traversal) {
     return grdu;
 }
 
-// ************************************************************************************
-// //
+// ************************************************************************************ //
 
 }  // namespace plato
 

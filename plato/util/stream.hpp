@@ -302,7 +302,7 @@ protected:
 
 /***************************************************************************/
 
-/// @brief 空输出流
+/// @brief 空输出流(主要用于统计写入数据的字节数)
 struct empty_ostream_t {
   /// @brief 输出的字节数
   size_t size_;
@@ -324,7 +324,7 @@ struct empty_ostream_t {
    * @brief 写入数据
    * @tparam T
    * @param size
-   * @return
+   * @return 写入数据的字节数
    */
   template<typename T>
   std::size_t write(const T*, std::size_t size) {

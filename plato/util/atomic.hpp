@@ -89,11 +89,15 @@ inline bool write_min(T * ptr, T val) {
   return done;
 }
 
+/// @brief 原子写入最大值,即*ptr=max(*ptr,val)
+/// @return 是否写入了val
 template <class T>
 inline bool write_max(T * ptr, T val) {
   volatile T curr_val;
   bool done = false;
+  // 将ptr处写为max(*ptr,val)
   do {
+    // 不断读取ptr处的值
     curr_val = *ptr;
   } while (curr_val < val && !(done = cas(ptr, curr_val, val)));
   return done;

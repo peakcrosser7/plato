@@ -190,7 +190,7 @@ class sequence_balanced_by_source_t {
         abort();
     }
 
-    /// @brief 获取本地节点对应的结点分区视图
+    /// @brief 获取本地节点对应的master结点分区视图
     sequence_v_view self_v_view(void) {
         auto &cluster_info = cluster_info_t::get_instance();
         return sequence_v_view(offset_[cluster_info.partition_id_],
@@ -225,7 +225,7 @@ class sequence_balanced_by_source_t {
 
     // ******************************************************************************* // 
 
-    /// @brief 集群节点对应的结点偏移量数组
+    /// @brief 集群节点对应的master结点偏移量数组
     std::vector<vid_t> offset_;
 
     // ******************************************************************************* // 
@@ -261,7 +261,7 @@ class sequence_balanced_by_destination_t {
         abort();
     }
 
-    /// @brief 返回本地节点的结点分区视图
+    /// @brief 返回本地节点的master结点分区视图
     sequence_v_view self_v_view(void) {
         auto &cluster_info = cluster_info_t::get_instance();
         return sequence_v_view(offset_[cluster_info.partition_id_],
@@ -297,7 +297,7 @@ class sequence_balanced_by_destination_t {
 
     // ******************************************************************************* //
 
-    /// @brief 集群节点对应的结点偏移量数组
+    /// @brief 集群节点对应的master结点偏移量数组
     std::vector<vid_t> offset_;
 
     // ******************************************************************************* //

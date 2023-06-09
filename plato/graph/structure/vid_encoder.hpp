@@ -206,7 +206,7 @@ void vid_encoder_t<EDATA, VID_T, CACHE>::encode(CACHE<EDATA, VID_T>& cache,
     cuckoomap_t id_table(vertex_size * 1.2);
     // 并行插入全局的结点
     // 结点ID对应一个全局索引i 相当于对结点进行了编码
-#pragma omp parallel for num_threads(cluster_info.threads_)
+    #pragma omp parallel for num_threads(cluster_info.threads_)
     for (vid_t i = 0; i < vertex_size; ++i) {
         id_table.upsert(
             global_ids_[i], [](vid_t&) {}, i);
@@ -222,7 +222,7 @@ void vid_encoder_t<EDATA, VID_T, CACHE>::encode(CACHE<EDATA, VID_T>& cache,
     traverse_opts_t traverse_opts;
     traverse_opts.auto_release_ = true;
     cache.reset_traversal(traverse_opts);
-#pragma omp parallel num_threads(cluster_info.threads_)
+    #pragma omp parallel num_threads(cluster_info.threads_)
     {
         using edge_unit_spec_t = edge_unit_t<EDATA, VID_T>;
         std::vector<edge_unit_t<EDATA, vid_t>> items(HUGESIZE);

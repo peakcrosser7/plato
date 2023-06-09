@@ -41,8 +41,8 @@
 
 namespace plato {
 
-// *******************************************************************************
-// // aggregate message
+// ******************************************************************************* //
+// aggregate message
 
 /// @brief 信息传递聚合的封装消息
 /// @tparam MSG 消息类型
@@ -110,12 +110,13 @@ R aggregate_message(
 
     auto bsp_send = [&](bsp_send_callback_t<mepa_ag_message_t<MSG>> send) {
         auto send_callback = [&](const mepa_ag_message_t<MSG> &message) {
+            // 将消息发送至对应结点的所在(master)分区
             send(partitioner->get_partition_id(message.v_i_), message);
         };
 
         mepa_ag_context_t<MSG> context{send_callback};
 
-        // 遍历每个结点并根据其邻接表生成消息
+        // 遍历图中每个结点并根据其邻接表生成消息
         auto traversal = [&](vid_t v_i,
                              const typename GRAPH::adj_unit_list_spec_t &adjs) {
             merge_task(context, v_i, adjs);
@@ -127,6 +128,7 @@ R aggregate_message(
         }
     };
 
+    // 接收消息
     auto bsp_recv = [&](int p_i,
                         bsp_recv_pmsg_t<mepa_ag_message_t<MSG>> &pmsg) {
         *preducer += sink_task(p_i, *pmsg);
@@ -136,17 +138,26 @@ R aggregate_message(
     trvs_opts.mode_ = traverse_mode_t::CIRCLE;
     graph.reset_traversal(trvs_opts);
 
+    // BSP消息传播
+    // 图计算对应PULL模式:
+    // 发送:每个集群节点遍历本地(mirror)结点及其邻接表计算生成消息,发送消息给master结点所在节点分区
+    //      DCSC以边的src划分master结点,因此遍历的本地结点均为mirror结点,而邻接表中的结点均为master结点
+    // 接收:master结点接收来自各个mirror结点所在节点分区的消息,进行归约并更新master结点属性,作为下一轮激活结点
+    //      下一轮的激活结点就是master结点为源结点的边的终结点,其mirror结点均在此集群节点中
     int rc = fine_grain_bsp<mepa_ag_message_t<MSG>>(
         bsp_send, bsp_recv, bsp_opts,
+        // 接收前设置归约值
         [&](void) { preducer = &reducer_vec[omp_get_thread_num()]; });
     CHECK(0 == rc);
 
+    // 多线程归约
     R reducer = R();
-#pragma omp parallel for reduction(+ : reducer)
+    #pragma omp parallel for reduction(+ : reducer)
     for (size_t i = 0; i < reducer_vec.size(); ++i) {
         reducer += reducer_vec[i];
     }
 
+    // 全局归约
     R global_reducer;
     MPI_Allreduce(&reducer, &global_reducer, 1, get_mpi_data_type<R>(), MPI_SUM,
                   MPI_COMM_WORLD);
@@ -154,11 +165,10 @@ R aggregate_message(
     return global_reducer;
 }
 
-// *******************************************************************************
-// //
+// ******************************************************************************* //
 
-// *******************************************************************************
-// // spread message
+// ******************************************************************************* //
+// spread message
 
 /// @brief 消息传递回调函数 (发送节点,消息)->void
 /// @tparam MSG 
@@ -274,7 +284,7 @@ R spread_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
 
     R reducer = R();
     // 对每个线程的结果进行归约
-#pragma omp parallel for reduction(+ : reducer)
+    #pragma omp parallel for reduction(+ : reducer)
     for (size_t i = 0; i < reducer_vec.size(); ++i) {
         reducer += reducer_vec[i];
     }
@@ -287,11 +297,10 @@ R spread_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
     return global_reducer;
 }
 
-// *******************************************************************************
-// //
+// ******************************************************************************* //
 
-// *******************************************************************************
-// // broadcast message
+// ******************************************************************************* //
+// broadcast message
 
 /// @brief 消息传递广播发送回调函数
 template <typename MSG>
@@ -339,7 +348,7 @@ R broadcast_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
     std::vector<R> reducer_vec(bc_opts.threads_, R());
     thread_local R *preducer;
 
-    // 每个激活结点发送消息的函数
+    // 每个激活master结点发送消息的函数
     auto __send = [&](bc_send_callback_t<MSG> send) {
         auto send_callback = [&](const MSG &message) { send(message); };
 
@@ -353,7 +362,7 @@ R broadcast_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
         }
     };
 
-    // 接收消息
+    // 接收消息函数
     auto __recv = [&](int p_i, bc_recv_pmsg_t<MSG> &pmsg) {
         *preducer += sink_task(p_i, *pmsg);
     };
@@ -361,6 +370,11 @@ R broadcast_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
     actives.reset_traversal();
 
     // 消息广播
+    // 图计算对应PUSH模式:
+    // 发送:每个集群节点遍历本地激活的master结点生成消息,发送消息给其mirror结点
+    //      BCSR以边的dst划分master结点,因此mirror结点可能在其他所有集群节点,均要发送,即以环形顺序广播消息
+    // 接收:每个集群节点的mirror结点接收来自master结点所在节点分区的消息,遍历其邻接表,更新邻结点属性并作为下一轮结点激活
+    //      下一轮的激活结点是以mirror结点为源结点的边的终结点,其master结点均在此集群节点中
     int rc = broadcast<MSG>(__send, __recv, bc_opts, [&](void) {
         preducer = &reducer_vec[omp_get_thread_num()];
     });
@@ -368,7 +382,7 @@ R broadcast_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
 
     R reducer = R();
     // 多线程归约
-#pragma omp parallel for reduction(+ : reducer)
+    #pragma omp parallel for reduction(+ : reducer)
     for (size_t i = 0; i < reducer_vec.size(); ++i) {
         reducer += reducer_vec[i];
     }
@@ -381,8 +395,7 @@ R broadcast_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
     return global_reducer;
 }
 
-// *******************************************************************************
-// //
+// ******************************************************************************* //
 
 } // namespace plato
 

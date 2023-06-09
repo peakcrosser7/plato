@@ -48,11 +48,11 @@ void init(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-  using bcsr_spec_t          = plato::bcsr_t<plato::empty_t, plato::sequence_balanced_by_destination_t>;
-  using dcsc_spec_t          = plato::dcsc_t<plato::empty_t, plato::sequence_balanced_by_source_t>;
-  using partition_bcsr_t     = bcsr_spec_t::partition_t;
-  using state_parent_t       = plato::dense_state_t<plato::vid_t, partition_bcsr_t>;
-  using bitmap_spec_t        = plato::bitmap_t<>;
+    using bcsr_spec_t          = plato::bcsr_t<plato::empty_t, plato::sequence_balanced_by_destination_t>;
+    using dcsc_spec_t          = plato::dcsc_t<plato::empty_t, plato::sequence_balanced_by_source_t>;
+    using partition_bcsr_t     = bcsr_spec_t::partition_t;
+    using state_parent_t       = plato::dense_state_t<plato::vid_t, partition_bcsr_t>;
+    using bitmap_spec_t        = plato::bitmap_t<>;
 
     plato::stop_watch_t watch;
     auto &cluster_info = plato::cluster_info_t::get_instance();
@@ -101,7 +101,7 @@ int main(int argc, char **argv) {
     parent.fill(graph_info.vertices_);
     parent[FLAGS_root] = FLAGS_root;
 
-    // 本地节点的结点分区视图
+    // 本地节点的master结点分区视图
     auto partition_view = graph.first.partitioner()->self_v_view();
 
     watch.mark("t1");
@@ -121,7 +121,7 @@ int main(int argc, char **argv) {
         }
 
         watch.mark("t1");
-        // 激活结点视图
+        // 本地节点的激活的master结点视图
         auto active_view =
             plato::create_active_v_view(partition_view, *active_current);
 
@@ -183,7 +183,7 @@ int main(int argc, char **argv) {
                         plato::vid_t src = it->neighbour_;
                         // 源结点此轮激活
                         if (active_current->get_bit(src)) {
-                            // 发送当前结点和源结点 
+                            // 发送当前结点和源结点到其master节点
                             context.send(message_spec_t{v_i, src});
                             break;
                         }
@@ -191,7 +191,7 @@ int main(int argc, char **argv) {
                 },
                 // PULL消息接收函数
                 [&](int /*p_i*/, message_spec_t &message) {
-                    // CAS设置接收结点的父结点
+                    // CAS设置接收结点的父结点(更新master结点状态)
                     if (plato::cas(&parent[message.v_i_], graph_info.vertices_,
                                    message.message_)) {
                         active_next->set_bit(message.v_i_);
@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
                 // PUSH消息发送函数
                 [&](const plato::mepa_bc_context_t<plato::vid_t> &context,
                     plato::vid_t v_i) { 
-                    // 发送当前结点ID
+                    // 发送当前master结点ID到其他分区的所有mirror结点
                     context.send(v_i); 
                 },
                 // PUSH消息接收函数

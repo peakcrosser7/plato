@@ -805,12 +805,13 @@ class object_file_buffer_t {
     constexpr static bool is_trivial() { return std::is_trivial<T>::value; }
 
   protected:
-    /// @brief 文件容量
+    /// @brief 缓存/文件容量
     size_t capacity_;
+    /// @brief 缓存/文件(已使用)大小
     size_t size_;
     /// @brief 临时文件
     temporary_file_t file_;
-    /// @brief 基于mmap的缓冲区
+    /// @brief mmap映射临时文件的内存缓冲区
     std::shared_ptr<char> base_;
 
     std::shared_ptr<background_executor> bio_;
@@ -831,12 +832,13 @@ object_file_buffer_t<T, Enable>::object_file_buffer_t(size_t capacity,
       traverse_direction_(true) {
     if (0 == capacity) {
         boost::filesystem::create_directories(cache_dir);
+        // 指定目录的磁盘空间信息中的总容量
         capacity = std::min(512UL * GBYTES,
                             boost::filesystem::space(cache_dir).capacity);
     }
     capacity_ = capacity;
     CHECK(capacity_);
-    // 截断文件大小
+    // 截断文件大小(文件大小小于容量则扩容并填充0)
     CHECK(-1 != ftruncate64(file_.fd(), capacity_))
         << boost::format(
                "WARNING: ftruncate64 failed, err code: %d, err msg: %s") %
@@ -847,6 +849,9 @@ object_file_buffer_t<T, Enable>::object_file_buffer_t(size_t capacity,
                errno % strerror(errno);
 
     base_.reset(
+        // `MAP_SHARED`:映射区域是共享的,可多个进程同时访问
+        // `MAP_NORESERVE`:映射区不需预留物理内存,即在需要时再分配物理内存
+        // 使用mmap将临时文件映射到内存中,对内存的修改直接会写入文件
         (char *)mmap(0, capacity_, PROT_WRITE, MAP_SHARED | MAP_NORESERVE,
                      file_.fd(), 0),
         [capacity](char *p) {
@@ -858,6 +863,8 @@ object_file_buffer_t<T, Enable>::object_file_buffer_t(size_t capacity,
     CHECK(MAP_FAILED != base_.get())
         << boost::format("WARNING: mmap failed, err code: %d, err msg: %s.") %
                errno % strerror(errno);
+    // `madvise()`:向内核提供关于进程虚拟内存区域使用情况的提示信息
+    // `MADV_SEQUENTIAL`:表示虚拟内存区域的使用情况是顺序的,内核应优先预读该区域的内容
     CHECK(-1 != madvise(base_.get(), capacity_, MADV_SEQUENTIAL))
         << boost::format("WARNING: madvise failed, err code: %d, err msg: %s") %
                errno % strerror(errno);
@@ -895,28 +902,34 @@ object_file_buffer_t<T, Enable>::object_file_buffer_t(
     this->operator=(std::forward<object_file_buffer_t>(other));
 }
 
+/// @brief 向缓存中置入元素
+/// @param pitems 元素数组首地址
+/// @param n 元素个数
+/// @return 元素在缓存中的偏移起点
 template <typename T, typename Enable>
 size_t object_file_buffer_t<T, Enable>::push_back(const T *pitems, size_t n) {
-    using empty_oarchive_t =
-        yas::binary_oarchive<empty_ostream_t,
-                             yas::binary | yas::ehost | yas::no_header>;
-    using mem_simple_oarchive_t =
-        yas::binary_oarchive<mem_simple_ostream_t,
-                             yas::binary | yas::ehost | yas::no_header>;
+    using empty_oarchive_t = yas::binary_oarchive<empty_ostream_t, yas::binary | yas::ehost | yas::no_header>;
+    using mem_simple_oarchive_t = yas::binary_oarchive<mem_simple_ostream_t, yas::binary | yas::ehost | yas::no_header>;
 
-    size_t ser_size;
+    size_t ser_size;    // 序列化大小
     {
         empty_ostream_t empty_ostream;
         empty_oarchive_t empty_oarchive(empty_ostream);
         for (size_t i = 0; i < n; ++i) {
+            // 对pitems[i]序列化
             empty_oarchive &pitems[i];
         }
+        // 空输出流大小即为对象的序列化大小
         ser_size = empty_ostream.size();
     }
 
+    // 更新缓存大小获取偏移起点
     size_t offset_begin = __sync_fetch_and_add(&size_, ser_size);
+    // 偏移终点
     size_t offset_end = offset_begin + ser_size;
+    // mmap映射单元索引终点
     size_t unit_index_end =
+        // `align_up(value,align)`:将value对其到align,即值是大于等于value的最小的align的倍数
         boost::alignment::align_up(offset_end, mmap_unit_capacity) /
         mmap_unit_capacity;
     CHECK(offset_end <= capacity_)
@@ -927,12 +940,14 @@ size_t object_file_buffer_t<T, Enable>::push_back(const T *pitems, size_t n) {
         mem_simple_ostream_t mem_simple_ostream(base_.get() + offset_begin,
                                                 base_.get() + offset_end);
         mem_simple_oarchive_t mem_simple_oarchive(mem_simple_ostream);
+        // 将pitems序列化至内存缓冲区
         for (size_t i = 0; i < n; ++i) {
             mem_simple_oarchive &pitems[i];
         }
         CHECK(mem_simple_ostream.size() == ser_size);
     }
 
+    // 记录最后一个内存映射单元的末尾偏移量
     write_max(&traverse_anchor_[unit_index_end - 1], offset_end);
 
     return offset_begin;

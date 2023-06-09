@@ -56,20 +56,20 @@
 
 namespace plato {
 
-// *******************************************************************************
-// // broadcast-message to all nodes in the cluster then do computation
+// ******************************************************************************* //
+// broadcast-message to all nodes in the cluster then do computation
 
 /// @brief 广播消息选项
 struct bc_opts_t {
-    int threads_ = -1;      // -1 means all available threads
-    int flying_recv_ = -1;  // -1 means equal to #node in the cluster
-    int flying_send_ = -1;  // -1 means equal to #node in the cluster
-    uint32_t global_size_ = 16 * MBYTES;  // at most global_size_ bytes will be
-                                          // cached per one request
-    int local_capacity_ = 4 * PAGESIZE;
-    uint32_t batch_size_ = 1;  // batch process #batch_size_ messages
+    int      threads_         = -1;            // -1 means all available threads
+    int      flying_recv_     = -1;            // -1 means equal to #node in the cluster
+    int      flying_send_     = -1;            // -1 means equal to #node in the cluster
+    uint32_t global_size_     = 16 * MBYTES;   // at most global_size_ bytes will be cached
+                                               // per one request
+    int      local_capacity_  = 4 * PAGESIZE;
+    uint32_t batch_size_      = 1;             // batch process #batch_size_ messages
 
-    bool include_self_ = true;  // broadcast messages to self-node or not
+    bool     include_self_    = true;          // broadcast messages to self-node or not
 };
 
 template <typename MSG>
@@ -310,7 +310,7 @@ int broadcast(
 
     // 接收请求线程
     std::thread recv_thread([&](void) {
-#pragma omp parallel num_threads(opts.threads_)
+        #pragma omp parallel num_threads(opts.threads_)
         {
             auto yeild = [&](bool inc, bool should_sleep) {
                 if (inc) {
@@ -492,7 +492,7 @@ int broadcast(
             }
         });
 
-#pragma omp parallel num_threads(opts.threads_)
+    #pragma omp parallel num_threads(opts.threads_)
     {
         oarchive_spec_t oarchive(16 * PAGESIZE);
 
@@ -669,8 +669,7 @@ int broadcast(
     return 0;
 }
 
-// *******************************************************************************
-// //
+// ******************************************************************************* //
 
 }  // namespace plato
 
