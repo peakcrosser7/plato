@@ -103,6 +103,7 @@ inline bool write_max(T * ptr, T val) {
   return done;
 }
 
+/// @brief 原子加等于,即*ptr=*ptr+val
 template <class T>
 inline void write_add(T * ptr, T val) {
   volatile T new_val, old_val;

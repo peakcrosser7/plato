@@ -57,8 +57,7 @@ struct object_buffer_opt_t {
     std::string path_ = ".cache";
 };
 
-// fixed-size, object buffer with thread-safe traversal
-/// @brief 对象缓存(数组)
+/// @brief 对象缓存(数组) fixed-size, object buffer with thread-safe traversal
 /// @tparam T 对象类型
 /// @tparam ALLOC 
 template <typename T, typename ALLOC = std::allocator<T>>
@@ -398,8 +397,7 @@ bool object_buffer_t<T, ALLOC>::next_chunk(Traversal &&traversal,
     return true;
 }
 
-// fixed-size, object block buffer with thread-safe traversal
-/// @brief 基于mmap的分块对象缓存
+/// @brief 基于mmap的分块对象缓存 fixed-size, object block buffer with thread-safe traversal
 template <typename T> 
 class object_block_buffer_t {
   public:
@@ -644,21 +642,35 @@ bool object_block_buffer_t<T>::next_chunk(Traversal &&traversal,
 
 namespace object_buffer_detail {
 
+/// @brief 预取状态
 enum prefetch_status {
+    /// @brief 需要预取
     need_prefetch,
+    /// @brief 正在预取
     prefetching,
+    /// @brief 已预取过
     prefetched,
 };
 
-template <typename T> struct traverse_unit {
+/// @brief 遍历单元
+/// @tparam T 
+template <typename T> 
+struct traverse_unit {
+    /// @brief 文件描述符
     int fd_ = -1;
+    /// @brief 偏移起点
     size_t offset_begin_ = 0;
+    /// @brief 偏移终点
     size_t offset_end_ = 0;
+    /// @brief mmap映射文件的内存起点
     void *map_begin_ = nullptr;
+    /// @brief 对象在映射内存的起点
     T *objs_begin_ = nullptr;
+    /// @brief 对象在映射内存的终点
     T *objs_end_ = nullptr;
     std::mutex mutex_;
     std::condition_variable cv_;
+    /// @brief 预取状态
     prefetch_status status_ = prefetch_status::need_prefetch;
 
     traverse_unit(const traverse_unit &) = delete;
@@ -687,14 +699,19 @@ template <typename T> struct traverse_unit {
 
     ~traverse_unit() { evict(); }
 
+    /// @brief 预取
+    /// @param wait 是否等待预取完成
+    /// @return 是否成功预取元素
     bool prefetch(bool wait) {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             switch (status_) {
             case prefetch_status::need_prefetch:
+                // 标记为正在预取
                 status_ = prefetch_status::prefetching;
                 break;
             case prefetch_status::prefetching:
+                // 若当前正在预取且需等待则进行等待
                 if (wait)
                     cv_.wait(lock);
                 return false;
@@ -707,9 +724,12 @@ template <typename T> struct traverse_unit {
 
         CHECK(fd_ != -1 && offset_begin_ < offset_end_ && !map_begin_ &&
               !objs_begin_ && !objs_end_);
+        // 文件偏移起点(与PAGESIZE向下对齐)
         size_t file_offset_begin =
             boost::alignment::align_down(sizeof(T) * offset_begin_, PAGESIZE);
+        // 文件偏移终点
         size_t file_offset_end = sizeof(T) * offset_end_;
+        // 映射文件到内存
         map_begin_ = mmap(0, file_offset_end - file_offset_begin, PROT_READ,
                           MAP_PRIVATE | MAP_POPULATE | MAP_NORESERVE, fd_,
                           file_offset_begin);
@@ -717,18 +737,22 @@ template <typename T> struct traverse_unit {
             << boost::format(
                    "WARNING: mmap failed, err code: %d, err msg: %s.") %
                    errno % strerror(errno);
+        // 对象起点
         objs_begin_ = (T *)((char *)map_begin_ + sizeof(T) * offset_begin_ -
                             file_offset_begin);
+        // 对象终点
         objs_end_ = objs_begin_ + offset_end_ - offset_begin_;
 
         {
             std::unique_lock<std::mutex> lock(mutex_);
+            // 标记为预取完成
             status_ = prefetch_status::prefetched;
             cv_.notify_all();
         }
         return true;
     }
 
+    /// @brief 释放对象的内存映射
     void evict() {
         if (map_begin_) {
             CHECK(fd_ != -1 && offset_begin_ < offset_end_ && objs_begin_ &&
@@ -814,11 +838,17 @@ class object_file_buffer_t {
     /// @brief mmap映射临时文件的内存缓冲区
     std::shared_ptr<char> base_;
 
+    /// @brief 后台IO执行器
     std::shared_ptr<background_executor> bio_;
+    /// @brief 遍历索引
     std::atomic<size_t> traverse_i_;
+    /// @brief 遍历范围数组
     std::vector<object_buffer_detail::traverse_unit<char>> traverse_range_;
+    /// @brief 遍历预取索引
     std::atomic<size_t> traverse_prefetch_i_;
+    /// @brief 遍历锚点
     std::vector<size_t> traverse_anchor_;
+    /// @brief 遍历方向
     bool traverse_direction_;
 };
 
@@ -953,19 +983,28 @@ size_t object_file_buffer_t<T, Enable>::push_back(const T *pitems, size_t n) {
     return offset_begin;
 }
 
+/// @brief 重置遍历
 template <typename T, typename Enable>
 void object_file_buffer_t<T, Enable>::reset_traversal(const traverse_opts_t &) {
     {
+        // 颠倒遍历方向
         traverse_direction_ = !traverse_direction_;
+        // `mprotect()`:修改指定内存区域的保护属性
+        // `PROT_NONE`:内存区域无任何权限,不可读不可写不可执行
         mprotect(base_.get(), capacity_, PROT_NONE);
         auto base = base_;
         auto size = size_;
         auto capacity = capacity_;
+        // 提交任务
         bio_->submit([base, size, capacity] {
+            // `msync()`:将指定内存区域的修改同步到磁盘上
+            // `MS_SYNC`:等待所有修改都被写入磁盘后返回
+            // 将映射缓存的修改同步到磁盘
             CHECK(-1 != msync(base.get(), size, MS_SYNC))
                 << boost::format(
                        "WARNING: msync failed, err code: %d, err msg: %s") %
                        errno % strerror(errno);
+            // `MADV_DONTNEED`:指定内存区域不再需要,内核可释放对应物理页面
             CHECK(-1 != madvise(base.get(), capacity, MADV_DONTNEED))
                 << boost::format(
                        "WARNING: madvise failed, err code: %d, err msg: %s") %
@@ -981,6 +1020,7 @@ void object_file_buffer_t<T, Enable>::reset_traversal(const traverse_opts_t &) {
     traverse_range_.clear();
     traverse_range_.reserve(buckets);
     size_t size = 0;
+    // 遍历每个锚点并放入范围区间
     for (size_t anchor : traverse_anchor_) {
         if (anchor) {
             traverse_range_.emplace_back(file_.fd(), size, anchor);
@@ -988,11 +1028,16 @@ void object_file_buffer_t<T, Enable>::reset_traversal(const traverse_opts_t &) {
         }
     }
     if (!traverse_direction_) {
+        // 颠倒元素
         std::reverse(traverse_range_.begin(), traverse_range_.end());
     }
     CHECK(size == size_);
 }
 
+/// @brief 处理一个分块的对象
+/// @param traversal 遍历处理函数
+/// @param[in,out] chunk_size 分块大小=1
+/// @return 是否成功
 template <typename T, typename Enable>
 template <typename Traversal>
 bool object_file_buffer_t<T, Enable>::next_chunk(Traversal &&traversal,
@@ -1002,6 +1047,7 @@ bool object_file_buffer_t<T, Enable>::next_chunk(Traversal &&traversal,
         return false;
     *chunk_size = 1;
 
+    // 提交预取任务
     bio_->submit([this] {
         size_t traverse_prefetch_i = traverse_prefetch_i_.fetch_add(1);
         if (traverse_prefetch_i < traverse_range_.size()) {
@@ -1009,6 +1055,7 @@ bool object_file_buffer_t<T, Enable>::next_chunk(Traversal &&traversal,
                 // prefecth failed. extend prefetch windows.
                 traverse_prefetch_i = traverse_prefetch_i_.fetch_add(1);
                 if (traverse_prefetch_i < traverse_range_.size()) {
+                    // 再次预取
                     traverse_range_[traverse_prefetch_i].prefetch(false);
                 }
             }
@@ -1017,23 +1064,27 @@ bool object_file_buffer_t<T, Enable>::next_chunk(Traversal &&traversal,
 
     object_buffer_detail::traverse_unit<char> &traverse =
         traverse_range_[range_i];
+    // 预取元素且等待至完成
     traverse.prefetch(true);
 
+    // 确保当前已经得到了元素
     CHECK(traverse.objs_begin_);
 
     using mem_iarchive_t =
         yas::binary_iarchive<mem_istream_t,
                              yas::binary | yas::ehost | yas::no_header>;
+    // 将对象置入输入流中
     mem_istream_t mem_istream(traverse.objs_begin_,
                               traverse.objs_end_ - traverse.objs_begin_);
     mem_iarchive_t mem_iarchive(mem_istream);
 
     while (!mem_istream.empty()) {
         T item;
-        mem_iarchive &item;
+        mem_iarchive &item; // 反序列化对象
         traversal(std::numeric_limits<size_t>::max(), &item);
     }
 
+    // 释放内存
     traverse.evict();
     return true;
 }

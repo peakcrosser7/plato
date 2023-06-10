@@ -83,9 +83,9 @@ dense_state_t<double, typename GRAPH::partition_t> pagerank (
       graph_info
   );
 
-  // 此轮迭代结点rank值稠密数据
+  // 此轮迭代结点PageRank值稠密数据
   rank_state_t curt_rank = engine.template alloc_v_state<double>();
-  // 下一轮迭代结点rank值稠密数据
+  // 下一轮迭代结点PageRank值稠密数据
   rank_state_t next_rank = engine.template alloc_v_state<double>();
 
   watch.mark("t1");
@@ -95,12 +95,28 @@ dense_state_t<double, typename GRAPH::partition_t> pagerank (
     LOG(INFO) << "generate out-degrees from graph cost: " << watch.show("t1") / 1000.0 << "s";
   }
 
-  // 两轮PageRank值的差值(初始化为1.)
+  /**
+   * PageRank算法说明:
+   * 使用公式: PR(A)=(1-d)+d(PR(T_1)/C(T_1)+...+PR(T_n)/C(T_n)) --Ref from Google
+   * 其中:
+   *  RP(A):结点A的PageRank值
+   *  d:阻尼系数,默认0.85
+   *  T_1,...,T_n:具有指向结点A的出边的结点,即结点A的入边邻结点
+   *  C(A):结点A的出边数,即结点A的出度
+   * 
+   * 以下代码实现中会做一个预处理:
+   * 每轮迭代计算PageRank值之后,会提前计算中间值PR'(A)=PR(A)/C(A),使得下一轮计算时可以直接使用,
+   * 即原PageRank公式变为: PR(A)=(1-d)+d(PR'(T_1)+...+PR'(T_n))
+   * 这也使得除去最后一轮迭代,cur_rank中记录的是PR'(A)=PR(A)/C(A)而非PR(A)
+  */
+
+  // 两轮所有结点的PageRank值的差值之和,此处初始化每个结点PageRank值为1
   double delta = curt_rank.template foreach<double> (
     [&](plato::vid_t v_i, double* pval) {
+      // 初始化每个结点PageRank值为1/OutDegrees(v_i)
       *pval = 1.0;
       if (odegrees[v_i] > 0) {
-        // 初始化结点PageRank值为\frac{1}{OutDegree(v_i)}
+        // 为下一轮迭代计算PR'(A)=PR(A)/C(A)
         *pval = *pval / odegrees[v_i];
       }
       return 1.0;
@@ -117,39 +133,46 @@ dense_state_t<double, typename GRAPH::partition_t> pagerank (
       // 消息发送函数
       [&](const context_spec_t& context, plato::vid_t v_i, const adj_unit_list_spec_t& adjs) {
         double rank_sum = 0.0;
-        // 遍历每个入度邻结点
+        // 遍历v_i的每个入度邻结点
         for (auto it = adjs.begin_; adjs.end_ != it; ++it) {
-          // 邻结点此轮PageRank值之和
+          // v_i邻结点此轮PageRank值之和
           rank_sum += curt_rank[it->neighbour_];
         }
         // 发送结点和PageRank值
         context.send(message_spec_t { v_i, rank_sum });
       },
+      // 消息接收函数
       [&](int, message_spec_t& msg) {
+        // 统计v_i全局的邻结点PageRank值之和
         plato::write_add(&next_rank[msg.v_i_], msg.message_);
         return 0;
       }
     );
 
-    if (opts.iteration_ - 1 == epoch_i) {
+    if (opts.iteration_ - 1 == epoch_i) { // 最后一轮迭代
       delta = next_rank.template foreach<double> (
         [&](plato::vid_t v_i, double* pval) {
+          // PR(v_i)=1-d+d(\sum_{(v_i,v_j)\in E}PR(v_j)/OutDegrees(v_j))
           *pval = 1.0 - opts.damping_ + opts.damping_ * (*pval);
           return 0;
         }
       );
-    } else {
+    } else {  // 不为最后一轮迭代
+      // 计算每个结点的PageRank值并返回差值
       delta = next_rank.template foreach<double> (
         [&](plato::vid_t v_i, double* pval) {
           *pval = 1.0 - opts.damping_ + opts.damping_ * (*pval);
-          if (odegrees[v_i] > 0) {
+          // 为下一轮迭代预处理,即计算中间值PR(v_i)/OutDegrees(v_i)
+          // 出度为0的结点不处理是因为没有结点会根据其计算PageRank值
+          if (odegrees[v_i] > 0) {  
             *pval = *pval / odegrees[v_i];
+            // 返回两轮PageRank值的差值(由于做了预处理因此需要再乘上出度)
             return fabs(*pval - curt_rank[v_i]) * odegrees[v_i];
           }
           return fabs(*pval - curt_rank[v_i]);
         }
       );
-
+      // 若PageRank两轮差值小于epsilon则再进行一轮迭代就终止
       if (opts.eps_ > 0.0 && delta < opts.eps_) {
         epoch_i = opts.iteration_ - 2;
       }

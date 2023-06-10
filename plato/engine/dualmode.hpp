@@ -99,9 +99,9 @@ class dualmode_engine_t {
     using v_subset_t = bitmap_t<>;
 
     /*
-     * create dualmode-engine from existed edges, better be used with
-     *create_dualmode_seq_from_path
-     **/
+    * create dualmode-engine from existed edges, 
+    * better be used with create_dualmode_seq_from_path
+    **/
     dualmode_engine_t(
         std::shared_ptr<INCOMING> in_edges, std::shared_ptr<OUTGOING> out_edges,
         const graph_info_t& graph_info,
@@ -120,19 +120,19 @@ class dualmode_engine_t {
 
     // transpose the graph
     // INCOMING and OUTGOING must have same type, and support std::swap
-    // std::enable_if<std::is_same<INCOMING, OUTGOING>::value, void> transpose(void);
+    // std::enable_if<std::is_same<INCOMING, OUTGOING>::value, void>
+    //   transpose(void);
 
     /*
-     * foreach edges in the graph, engine will switch between push-pull mode
-     *based on the ACTIVE edges in the graph.
+     * foreach edges in the graph, engine will switch between push-pull mode based on the
+     * ACTIVE edges in the graph.
      *
      * \tparam MSG           message type
      * \tparam R             return type of slot
      * \tparam PUSH_SIGNAL   void(const mepa_bc_context_t<MSG>&, vid_t)
-     * \tparam PUSH_SLOT     R(int, MSG&) // first int param is node-id not
-     *vertex-id !!! \tparam PULL_SIGNAL   void(const mepa_ag_context_t<MSG>&,
-     *const dcsc_spec_t::adj_unit_list_spec_t&) \tparam PULL_SLOT     R(int,
-     *mepa_ag_message_t<MSG>&) // partition-id, message
+     * \tparam PUSH_SLOT     R(int, MSG&) // first int param is node-id not vertex-id !!!
+     * \tparam PULL_SIGNAL   void(const mepa_ag_context_t<MSG>&, const dcsc_spec_t::adj_unit_list_spec_t&)
+     * \tparam PULL_SLOT     R(int, mepa_ag_message_t<MSG>&) // partition-id, message
      *
      * \param push_signal    push-signal functor, can be nullptr
      * \param push_slot      push-slot functor, can be nullptr
@@ -331,7 +331,7 @@ R dualmode_engine_t<INCOMING, OUTGOING>::foreach_edges(
     // 根据激活结点重置遍历
     out_degrees_->reset_traversal(
         std::shared_ptr<v_subset_t>(&actives, [](v_subset_t*) {}));
-#pragma omp parallel reduction(+ : active_edges)
+    #pragma omp parallel reduction(+ : active_edges)
     {
         size_t chunk_size = 4 * PAGESIZE;
         eid_t __active_edges = 0;
@@ -414,8 +414,7 @@ R dualmode_engine_t<INCOMING, OUTGOING>::foreach_edges(
     }
 }
 
-// *******************************************************************************
-// //
+// ******************************************************************************* //
 
 }  // namespace plato
 
