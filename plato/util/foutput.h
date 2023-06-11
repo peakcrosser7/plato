@@ -54,6 +54,7 @@ protected:
     fs_output_v_;
 };
 
+/// @brief 线程本地文件输出流
 class thread_local_fs_output {
 public:
   thread_local_fs_output(const thread_local_fs_output&) = delete;
@@ -75,15 +76,21 @@ public:
 
   void foreach(std::function<void(const std::string& filename, boost::iostreams::filtering_ostream& os)> reducer);
 
+  /// @brief 获取线程本地文件输出流
   [[gnu::always_inline]] [[gnu::hot]]
   boost::iostreams::filtering_ostream& local() { return ((fs*)thread_local_object_detail::get_local_object(id_))->os_; }
 protected:
+  /// @brief 文件流
   struct fs {
+    /// @brief 文件名
     std::string filename_;
+    /// @brief HDFS文件流
     std::unique_ptr<hdfs_t::fstream> hdfs_;
+    /// @brief 输出流
     boost::iostreams::filtering_ostream os_;
   };
 
+  /// @brief 全局文件流ID
   int id_;
 };
 

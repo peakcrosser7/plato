@@ -27,8 +27,10 @@
 
 namespace plato {
 
+/// @brief 创建文件夹
+/// @param path 文件夹路径
 static void touch_dir(const std::string& path) {
-  if (!boost::filesystem::exists(path)) {
+  if (!boost::filesystem::exists(path)) { // 文件夹不存在则创建
       boost::filesystem::create_directories(path);
   }
   CHECK(boost::filesystem::is_directory(path));
@@ -86,31 +88,36 @@ boost::iostreams::filtering_stream<boost::iostreams::output>& fs_mt_omp_output_t
   return ostream(omp_get_thread_num());
 }
 
+/// @brief 构造函数
+/// @param path 文件目录
+/// @param prefix 文件名前缀
+/// @param compressed 是否压缩文件
 thread_local_fs_output::thread_local_fs_output(const std::string& path, const std::string& prefix, bool compressed) {
   std::shared_ptr<std::atomic<unsigned>> suffix(new std::atomic<unsigned>());
 
+  // 文件流构建函数,返回构建的文件流
   std::function<void*()> construction([path, prefix, compressed, suffix] {
     auto fs_ = new fs();
 
     std::string filename;
-    if (compressed) {
+    if (compressed) { // 压缩文件
       filename = (boost::format("%s/%s%04d.csv.gz") % path % prefix % (*suffix)++).str();
-      fs_->os_.push(boost::iostreams::gzip_compressor());
+      fs_->os_.push(boost::iostreams::gzip_compressor()); // 添加gzip压缩器
     } else {
       filename = (boost::format("%s/%s%04d.csv") % path % prefix % (*suffix)++).str();
     }
     fs_->filename_ = filename;
 
-    if (boost::istarts_with(filename, "hdfs://")) {
-      if (hdfs_t::get_hdfs(filename).exists(filename)) {
+    if (boost::istarts_with(filename, "hdfs://")) {   // HDFS文件
+      if (hdfs_t::get_hdfs(filename).exists(filename)) {  // 文件存在则删除
         CHECK(0 == hdfs_t::get_hdfs(filename).remove(filename, 0)) << "failed to remove exist file: " << filename;
       }
       fs_->hdfs_.reset(new hdfs_t::fstream(plato::hdfs_t::get_hdfs(filename), filename, true));
-      fs_->os_.push(*fs_->hdfs_);
-    } else {
-      touch_dir(path);
+      fs_->os_.push(*fs_->hdfs_); // 添加HDFS处理
+    } else {  // 普通文件
+      touch_dir(path);  // 创建文件夹
       namespace fs = boost::filesystem;
-      if (fs::exists(filename)) {
+      if (fs::exists(filename)) { // 文件存在则删除
         CHECK(fs::remove(filename)) << "failed to remove exist file: " << filename;
       }
       fs_->os_.push(boost::iostreams::file_sink(filename));
@@ -119,13 +126,15 @@ thread_local_fs_output::thread_local_fs_output(const std::string& path, const st
     return (void*)fs_;
   });
 
+  // 文件流析构函数
   std::function<void(void *)> destruction([] (void* p) {
     auto fs_ = (fs*)p;
-    fs_->os_.flush();
+    fs_->os_.flush(); // 文件流清空缓冲区写入文件
     CHECK(fs_->os_.good()) << "flush file filed, filename: " << fs_->filename_;
     delete fs_;
   });
 
+  // 创建对象得到对应ID
   id_ = thread_local_object_detail::create_object(std::move(construction), std::move(destruction));
   if (-1 == id_) throw std::runtime_error("thread_local_object_detail::create_object failed.");
 }

@@ -91,6 +91,7 @@ int main(int argc, char **argv) {
     opts.damping_   = FLAGS_damping;
     opts.eps_       = FLAGS_eps;
 
+    // 结点PageRank值的稠密数据
     auto ranks = plato::algo::pagerank<graph_spec_t>(*pdcsc, graph_info, opts);
 
     if (0 == cluster_info.partition_id_) {
@@ -104,7 +105,9 @@ int main(int argc, char **argv) {
             FLAGS_output,
             (boost::format("%04d_") % cluster_info.partition_id_).str(), true);
 
+        // 输出PageRank值到文件
         ranks.foreach<int>([&](plato::vid_t v_i, double *pval) {
+            // 线程本地的输出流
             auto &fs_output = os.local();
             fs_output << v_i << "," << *pval << "\n";
             return 0;

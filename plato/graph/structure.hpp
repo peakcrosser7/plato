@@ -570,7 +570,7 @@ std::shared_ptr<dcsc_t<EDATA, SEQ_PART>> create_dcsc_seq_from_path (
     }
     watch.mark("t1");
 
-    std::shared_ptr<SEQ_PART> part_dcsc = nullptr;
+    std::shared_ptr<SEQ_PART> part_dcsc = nullptr;  // master结点划分序列
     {
         std::vector<vid_t> degrees;     // 全局结点度数
         if (use_in_degree) {

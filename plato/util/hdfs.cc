@@ -98,12 +98,12 @@ void hdfs_t::parse_csv_files(
         fin.back()->push(*chunk_stream.back());
     }
 
-#pragma omp parallel
+    #pragma omp parallel
     {
         std::vector<std::vector<std::string>> blocks;
         std::string oneline;
 
-#pragma omp for schedule(dynamic)
+        #pragma omp for schedule(dynamic)
         for (size_t i = 0; i < fin.size(); ++i) {
             auto& sin = fin[i];
             while (sin->good() && (false == sin->eof())) {
