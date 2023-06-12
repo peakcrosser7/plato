@@ -134,7 +134,7 @@ thread_local_fs_output::thread_local_fs_output(const std::string& path, const st
     delete fs_;
   });
 
-  // 创建对象得到对应ID
+  // 创建进程内对象得到对应ID
   id_ = thread_local_object_detail::create_object(std::move(construction), std::move(destruction));
   if (-1 == id_) throw std::runtime_error("thread_local_object_detail::create_object failed.");
 }

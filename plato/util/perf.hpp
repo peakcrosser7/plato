@@ -84,14 +84,14 @@ inline double current_milliseconds(void) {
 /// @brief 计时器
 class stop_watch_t {
   public:
-    // start a new mark
-    /// @brief 记录一个新的时间
-    /// @param smark 标志字符串
+    /// @brief 记录一个新的时间 start a new mark
+    /// @param smark 标记字符串
     void mark(const std::string &smark) {
         mark_[smark] = current_milliseconds();
     }
 
-    // return a mark's cost in milliseconds
+    /// @brief 返回某一标记上次记录到现在的用时 return a mark's cost in milliseconds
+    /// @param smark 标记字符串
     double show(const std::string &smark) {
         return current_milliseconds() - mark_[smark];
     }

@@ -107,7 +107,7 @@ int main(int argc, char **argv) {
 
         // 输出PageRank值到文件
         ranks.foreach<int>([&](plato::vid_t v_i, double *pval) {
-            // 线程本地的输出流
+            // 线程本地的文件输出流(foreach是多线程调用)
             auto &fs_output = os.local();
             fs_output << v_i << "," << *pval << "\n";
             return 0;

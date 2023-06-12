@@ -36,7 +36,7 @@ static constexpr int objs_capacity = 4096;
 /// @brief 全局对象锁
 static std::mutex g_mutex_;
 
-/// @brief 分布式对象数组(进程内可见)
+/// @brief 分布式对象数组(进程内均可见)
 static std::vector<std::shared_ptr<dist_obj>> dist_objs_(objs_capacity);
 /// @brief 每个对象的互斥锁数组
 static std::vector<std::mutex> mutex_v_(objs_capacity);
@@ -65,9 +65,9 @@ struct dist_obj : public std::enable_shared_from_this<dist_obj> {
   std::function<void(void *)> destruction_;
   /// @brief 正在关闭标识符
   bool closing_ = false;
-  /// @brief 线程本地对象的侵入式列表
+  /// @brief 关联的线程本地对象的侵入式列表
   objs_list_t objs_list_;
-  /// @brief 内部封装对象的列表
+  /// @brief 关联的内部封装对象的列表
   std::list<std::shared_ptr<void>> objs_p_list_;
 
   /// @brief promise对象
@@ -113,7 +113,7 @@ int create_object(std::function<void*()> construction, std::function<void(void *
   return -1;
 }
 
-/// @brief 删除对象
+/// @brief 删除分布式对象及其关联的线程本地对象
 /// @param id 对象ID
 void delete_object(int id) {
   if (id < 0 || id >= objs_capacity) throw std::runtime_error("invalid object id");
@@ -125,7 +125,7 @@ void delete_object(int id) {
     // 标记正在关闭对象
     dist_obj_->closing_ = true;
 
-    // 将对象从列表中移除
+    // 将线程本地对象从列表中移除
     while (!dist_obj_->objs_list_.empty()) {
       local_obj& obj = dist_obj_->objs_list_.front();
       obj.local_obj_p_.reset();
@@ -137,14 +137,16 @@ void delete_object(int id) {
   }
 
   std::future<void> fut = std::move(dist_obj_->fut_);
+  // 重置分布式对象
   dist_obj_.reset();
   fut.get();
 }
 
-/// @brief 返回线程本地的对象
-/// @param id 对象ID
+/// @brief 返回分布式对象关联的线程本地的对象
+/// @param id 分布式对象ID
+/// @return 线程本地的内部封装对象
 void* get_local_object(int id) {
-  // 线程本地对象
+  // 线程本地对象数组
   static thread_local local_obj* local_objs_p_;
   //  `__glibc_unlikely()`:提示编译器某个条件分支不太可能发生
   if (__glibc_unlikely(!local_objs_p_)) {
@@ -158,11 +160,11 @@ void* get_local_object(int id) {
     local_objs_p_ = local_objs_.data();
   }
 
-  local_obj& obj = local_objs_p_[id];   // 对应线程本地的对象
+  local_obj& obj = local_objs_p_[id];   // 分布式对象ID对应的线程本地对象
   if (__glibc_unlikely(!obj.local_obj_p_.get())) {  // 本地对象为空时
     std::shared_ptr<dist_obj> dist_obj_ = dist_objs_[id];
     if (!dist_obj_) throw std::runtime_error("object not exist.");
-    // 创建内部封装的对象
+    // 构建内部封装的对象(由于get_local_object()应该是每个线程调用,因此此处每个线程都会构建一个对象)
     std::shared_ptr<void> p(dist_obj_->construction_(), dist_obj_->destruction_);
     {
       std::lock_guard<std::mutex> lock(mutex_v_[id]);
@@ -172,6 +174,7 @@ void* get_local_object(int id) {
       dist_obj_->objs_list_.push_back(obj);
       // 添加内部封装对象到列表
       dist_obj_->objs_p_list_.push_back(p);
+      // 设置线程本地对象的内部封装对象和所在的分布式对象
       obj.local_obj_p_ = p;
       obj.dist_obj_ = dist_obj_;
     }

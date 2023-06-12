@@ -55,8 +55,8 @@ class dense_state_t {
     // std::is_standard_layout<T>::value,
     //     "dense_state_t only support pod-type");
 
-    // *******************************************************************************
-    // // required types & methods
+    // ******************************************************************************* //
+    // required types & methods
 
     using value_t = T;
     using partition_t = PART_IMPL;
@@ -293,7 +293,7 @@ void dense_state_t<T, PART_IMPL, ALLOC, BITMAP>::fill(const T& value) {
     };
 
     reset_traversal();
-#pragma omp parallel
+    #pragma omp parallel
     {
         size_t chunk_size = 64;
         while (next_chunk(traversal, &chunk_size)) {

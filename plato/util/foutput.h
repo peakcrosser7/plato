@@ -76,8 +76,8 @@ public:
 
   void foreach(std::function<void(const std::string& filename, boost::iostreams::filtering_ostream& os)> reducer);
 
-  /// @brief 获取线程本地文件输出流
-  [[gnu::always_inline]] [[gnu::hot]]
+  /// @brief 获取线程本地的文件输出流
+  [[gnu::always_inline]] [[gnu::hot]] // `[[gnu::hot]]`:标记函数为热点函数,即被频繁调用的函数
   boost::iostreams::filtering_ostream& local() { return ((fs*)thread_local_object_detail::get_local_object(id_))->os_; }
 protected:
   /// @brief 文件流

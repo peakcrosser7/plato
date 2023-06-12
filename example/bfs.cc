@@ -89,11 +89,9 @@ int main(int argc, char **argv) {
     // 已访问结点位图
     bitmap_spec_t visited(graph_info.vertices_);
     // 此轮迭代激活结点位图
-    std::shared_ptr<bitmap_spec_t> active_current(
-        new bitmap_spec_t(graph_info.vertices_));
+    std::shared_ptr<bitmap_spec_t> active_current(new bitmap_spec_t(graph_info.vertices_));
     // 下一轮迭代激活结点位图
-    std::shared_ptr<bitmap_spec_t> active_next(
-        new bitmap_spec_t(graph_info.vertices_));
+    std::shared_ptr<bitmap_spec_t> active_next(new bitmap_spec_t(graph_info.vertices_));
 
     // BFS初始化
     visited.set_bit(FLAGS_root);
@@ -156,18 +154,18 @@ int main(int argc, char **argv) {
         if (0 == FLAGS_type || false == is_sparse) { // pull
             using context_spec_t = plato::mepa_ag_context_t<plato::vid_t>;
             using message_spec_t = plato::mepa_ag_message_t<plato::vid_t>;
+            using adj_unit_list_spec_t = dcsc_spec_t::adj_unit_list_spec_t;
 
             watch.mark("t11");
             visited.sync();
 
             if (0 == cluster_info.partition_id_) {
-                LOG(INFO) << "bitmap sync time: " << watch.show("t11") / 1000.0
-                          << "s";
+                LOG(INFO) << "bitmap sync time: " << watch.show("t11") / 1000.0 << "s";
             }
 
             plato::bsp_opts_t opts;
             opts.local_capacity_ = 32 * PAGESIZE;
-            // 聚合计算得到新一轮激活结点数
+            // PULL模式 聚合计算得到新一轮激活结点数
             actives = plato::aggregate_message<plato::vid_t, int, dcsc_spec_t>(
                 // 入边方向图结构
                 graph.second,
@@ -204,7 +202,7 @@ int main(int argc, char **argv) {
         } else { // push
             plato::bc_opts_t opts;
             opts.local_capacity_ = 4 * PAGESIZE;
-            // 广播计算得到新一轮激活结点数
+            // PUSH模式 广播计算得到新一轮激活结点数
             actives = plato::broadcast_message<plato::vid_t, plato::vid_t>(
                 active_view,
                 // PUSH消息发送函数
