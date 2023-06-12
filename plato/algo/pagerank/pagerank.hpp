@@ -83,18 +83,6 @@ dense_state_t<double, typename GRAPH::partition_t> pagerank (
       graph_info
   );
 
-  // 此轮迭代结点PageRank值稠密数据
-  rank_state_t curt_rank = engine.template alloc_v_state<double>();
-  // 下一轮迭代结点PageRank值稠密数据
-  rank_state_t next_rank = engine.template alloc_v_state<double>();
-
-  watch.mark("t1");
-  // 结点出度稠密数据
-  auto odegrees = plato::generate_dense_out_degrees_fg<uint32_t>(graph_info, graph, false);
-  if (0 == cluster_info.partition_id_) {
-    LOG(INFO) << "generate out-degrees from graph cost: " << watch.show("t1") / 1000.0 << "s";
-  }
-
   /**
    * PageRank算法说明:
    * 使用公式: PR(A)=(1-d)+d(PR(T_1)/C(T_1)+...+PR(T_n)/C(T_n)) --Ref from Google
@@ -109,6 +97,18 @@ dense_state_t<double, typename GRAPH::partition_t> pagerank (
    * 即原PageRank公式变为: PR(A)=(1-d)+d(PR'(T_1)+...+PR'(T_n))
    * 这也使得除去最后一轮迭代,cur_rank中记录的是PR'(A)=PR(A)/C(A)而非PR(A)
   */
+
+  // 此轮迭代结点PageRank值稠密数据
+  rank_state_t curt_rank = engine.template alloc_v_state<double>();
+  // 下一轮迭代结点PageRank值稠密数据
+  rank_state_t next_rank = engine.template alloc_v_state<double>();
+
+  watch.mark("t1");
+  // 结点出度稠密数据
+  auto odegrees = plato::generate_dense_out_degrees_fg<uint32_t>(graph_info, graph, false);
+  if (0 == cluster_info.partition_id_) {
+    LOG(INFO) << "generate out-degrees from graph cost: " << watch.show("t1") / 1000.0 << "s";
+  }
 
   // 两轮所有结点的PageRank值的差值之和
   double delta = curt_rank.template foreach<double> (
@@ -151,10 +151,10 @@ dense_state_t<double, typename GRAPH::partition_t> pagerank (
     );
 
     if (opts.iteration_ - 1 == epoch_i) { // 最后一轮迭代
-      // 计算每个结点的PageRank值并返回差值
+      // 计算每个结点的PageRank值
       delta = next_rank.template foreach<double> (
         [&](plato::vid_t v_i, double* pval) {
-          // PR(v_i)=1-d+d(\sum_{(v_i,v_j)\in E}PR'(v_j))=1-d+d(\sum_{(v_i,v_j)\in E}PR(v_j)/OutDegrees(v_j))
+          // PR(v_i)=(1-d)+d(\sum_{v_j\in InN(v_i)}PR'(v_j))=1-d+d(\sum_{v_j\in InN(v_i)}PR(v_j)/OutDeg(v_j))
           *pval = 1.0 - opts.damping_ + opts.damping_ * (*pval);
           return 0;
         }
@@ -164,7 +164,7 @@ dense_state_t<double, typename GRAPH::partition_t> pagerank (
       delta = next_rank.template foreach<double> (
         [&](plato::vid_t v_i, double* pval) {
           *pval = 1.0 - opts.damping_ + opts.damping_ * (*pval);
-          // 为下一轮迭代预处理,即计算中间值PR'(v_i)=PR(v_i)/OutDegrees(v_i)
+          // 为下一轮迭代预处理,即计算中间值PR'(v_i)=PR(v_i)/OutDeg(v_i)
           // 出度为0的结点不处理是因为没有结点会根据其计算PageRank值
           if (odegrees[v_i] > 0) {  
             *pval = *pval / odegrees[v_i];

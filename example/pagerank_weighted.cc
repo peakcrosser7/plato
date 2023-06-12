@@ -38,11 +38,11 @@ DEFINE_bool(is_directed,   false,   "is graph directed or not");
 DEFINE_bool(part_by_in,    false,   "partition by in-degree");
 DEFINE_int32(alpha,        -1,      "alpha value used in sequence balance partition");
 DEFINE_uint64(iterations,  100,     "number of iterations");
-DEFINE_double(damping,     0.85,    "the damping factor");
+DEFINE_double(damping,     0.85,    "the damping factor");  // 阻尼系数
 DEFINE_double(eps,         0.001,   "the calculation will be considered complete if the sum of \
                                      the difference of the 'rank' value between iterations \
                                      changes less than 'eps'. if 'eps' equals to 0, pagerank will be \
-                                     force to execute 'iteration' epochs.");
+                                     force to execute 'iteration' epochs.");  // 收敛差值epsilon
 
 bool string_not_empty(const char*, const std::string& value) {
   if (0 == value.length()) { return false; }
@@ -68,6 +68,7 @@ int main(int argc, char** argv) {
   watch.mark("t0");
   
   plato::graph_info_t graph_info(FLAGS_is_directed);
+  // 本地DCSC图结构
   auto pdcsc = plato::create_dcsc_seqs_from_path<double>(
     &graph_info, FLAGS_input, plato::edge_format_t::CSV,
     plato::double_decoder, FLAGS_alpha, FLAGS_part_by_in
