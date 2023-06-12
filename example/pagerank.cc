@@ -104,6 +104,21 @@ int main(int argc, char** argv) {
 
   watch.mark("t2"); // do computation
 
+  /**
+   * PageRank算法说明:
+   * 使用公式: PR(A)=(1-d)+d(PR(T_1)/C(T_1)+...+PR(T_n)/C(T_n)) --Ref from Google
+   * 其中:
+   *  RP(A):结点A的PageRank值
+   *  d:阻尼系数,默认0.85
+   *  T_1,...,T_n:具有指向结点A的出边的结点,即结点A的入边邻结点
+   *  C(A):结点A的出边数,即结点A的出度
+   * 
+   * 以下代码实现中会做一个预处理:
+   * 每轮迭代计算PageRank值之后,会提前计算中间值PR'(A)=PR(A)/C(A),使得下一轮计算时可以直接使用,
+   * 即原PageRank公式变为: PR(A)=(1-d)+d(PR'(T_1)+...+PR'(T_n))
+   * 这也使得除去最后一轮迭代,cur_rank中记录的是PR'(A)=PR(A)/C(A)而非PR(A)
+  */
+
   // 两轮所有结点的PageRank值的差值之和
   double delta = curt_rank->foreach<double> (
     [&](plato::vid_t v_i, double* pval) {
