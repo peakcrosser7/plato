@@ -175,7 +175,7 @@ struct cluster_info_t {
     /// @brief 分区ID(进程ID)
     int partition_id_;
 
-    /// @brief 线程总数
+    /// @brief 线程总数,等于CPU核心数量
     int threads_;
     /// @brief NUMA节点数
     int sockets_;
