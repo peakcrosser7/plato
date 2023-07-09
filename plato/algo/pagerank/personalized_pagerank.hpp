@@ -80,13 +80,6 @@ dense_state_t<double, typename GRAPH::partition_t> personalized_pagerank (
       curt_rank[src] = curt_rank[src] / odegrees[src];
   }
 
-  // bool src_updated = false;
-  // auto is_src_updated = [&](plato::vid_t v) -> bool {
-  //   if(v == src && !src_updated) {
-  //     return true;
-  //   }
-  //   return false;
-  // }
   for (uint32_t epoch_i = 0; epoch_i < opts.iteration_; ++epoch_i) {
     watch.mark("t1");
   
