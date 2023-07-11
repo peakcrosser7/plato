@@ -149,6 +149,29 @@ cc_binary (
 )
 
 cc_binary (
+    name = "pushpull_ppr",
+    srcs = [
+        "pushpull_ppr.cc",
+    ],
+    copts = ['-g', '-O2', ] + PLATO_OPTS,
+    linkopts = [ ] + PLATO_OPTS,
+    deps = [
+        "//3rd/glog:glog",
+        "//3rd/gflags:gflags",
+
+        "//3rd/boost:boost_include",
+        "//3rd/boost:boost_iostreams",
+
+        "//plato/graph:graph",
+        "//plato/algo/pagerank:personalized_pagerank",
+    ],
+    defines = [
+        # "__DCSC_DEBUG__",
+    ],
+    linkstatic = 1,
+)
+
+cc_binary (
     name = "bfs",
     srcs = [
         "bfs.cc",
