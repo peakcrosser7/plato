@@ -30,6 +30,7 @@
 
 namespace plato {
 
+/// @brief 根据源结点的哈希分区
 template <typename Hash = std::hash<vid_t>>
 class hash_by_source_t {
 public:

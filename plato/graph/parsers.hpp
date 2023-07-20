@@ -54,7 +54,7 @@ template <typename EdgeData>
 using decoder_t = std::function<bool(EdgeData*, char*)>;
 
 /**
- * @brief null decoder
+ * @brief null decoder 空解码器
  * @tparam EdgeData
  * @return
  */
@@ -64,7 +64,7 @@ inline bool dummy_decoder(EdgeData* /*pOutput*/, char* /*sInput*/) {
 }
 
 /**
- * @brief decoder
+ * @brief decoder 单精度浮点数解码器
  * @param output - result
  * @param s_input - input string
  * @return is success
@@ -177,19 +177,8 @@ class decoder_with_default_t {
     EdgeData default_value_;
 };
 
+
 /*
- * \brief edge_parser_t,  parse from input stream, call user provide function
- *when buffer if full edge_parser_t must be reentrant
- *
- * \param fin,          input stream
- * \param callback      user provide callback function for take edges away
- *
- * \return:
- *      >=0 edges parse from fin
- *      <0  something wrong happened
- *
- *
- *
  * \brief blockcallback_t, user provide function to deal with extracted edges
  *                  blockcallback_t must be reentrant
  *
@@ -203,6 +192,17 @@ template <typename EdgeData, typename VID_T = vid_t>
 using blockcallback_t =
     std::function<bool(edge_unit_t<EdgeData, VID_T>*, size_t)>;
 
+/*
+ * \brief edge_parser_t,  parse from input stream, call user provide function
+ *when buffer if full edge_parser_t must be reentrant
+ *
+ * \param fin,          input stream
+ * \param callback      user provide callback function for take edges away
+ *
+ * \return:
+ *      >=0 edges parse from fin
+ *      <0  something wrong happened
+ **/
 template <typename STREAM_T, typename EdgeData, typename VID_T = vid_t>
 using edge_parser_t = std::function<ssize_t(
     STREAM_T&, blockcallback_t<EdgeData, VID_T>, decoder_t<EdgeData>)>;
@@ -218,7 +218,7 @@ using edge_parser_t = std::function<ssize_t(
  * @tparam VID_T
  * @param fin 文件输入流
  * @param callback 到HUGESIZE时的回调函数
- * @param decoder 边数据解码器
+ * @param decoder 边数据解码函数
  * @return 读取的边数
  */
 template <typename STREAM_T, typename EdgeData, typename VID_T = vid_t>
@@ -245,7 +245,7 @@ ssize_t csv_parser(STREAM_T& fin, blockcallback_t<EdgeData, VID_T> callback,
             continue;
         }
 
-        // 切分数据得到边的源结点,终结点,边数据
+        // 切分数据得到边的源结点,目标结点,边数据
         pLog = sInput.get();
         pToken = strtok_r(sInput.get(), ",", &pSave);
         if (nullptr == pToken) {
@@ -308,18 +308,6 @@ ssize_t csv_parser(STREAM_T& fin, blockcallback_t<EdgeData, VID_T> callback,
 }
 
 /*
- * \brief vertex_parser_t,  parse from input stream, call user provide function
- *when buffer if full vertex_parser_t must be reentrant
- *
- * \param fin,          input stream
- * \param callback      user provide callback function for take edges away
- *
- * \return:
- *      >=0 vertices parse from fin
- *      <0  something wrong happened
- *
- *
- *
  * \brief vertex_blockcallback_t, user provide function to deal with extracted
  *edges blockcallback_t must be reentrant
  *
@@ -333,6 +321,17 @@ template <typename VertexData>
 using vertex_blockcallback_t =
     std::function<bool(vertex_unit_t<VertexData>*, size_t)>;
 
+/*
+ * \brief vertex_parser_t,  parse from input stream, call user provide function
+ *when buffer if full vertex_parser_t must be reentrant
+ *
+ * \param fin,          input stream
+ * \param callback      user provide callback function for take edges away
+ *
+ * \return:
+ *      >=0 vertices parse from fin
+ *      <0  something wrong happened
+ **/
 template <typename STREAM_T, typename VertexData>
 using vertex_parser_t = std::function<ssize_t(
     STREAM_T&, vertex_blockcallback_t<VertexData>, decoder_t<VertexData>)>;
@@ -340,13 +339,13 @@ using vertex_parser_t = std::function<ssize_t(
 // build-in parsers
 
 /**
- * @brief parser for csv format
+ * @brief parser for csv format 结点CSV文件解析器
  * @tparam STREAM_T
- * @tparam VertexData
- * @param fin
- * @param callback
- * @param decoder
- * @return
+ * @tparam VertexData 结点数据
+ * @param fin 文件输入流
+ * @param callback 到HUGESIZE时的回调函数
+ * @param decoder 结点数据解码函数
+ * @return 读取的结点数
  */
 template <typename STREAM_T, typename VertexData>
 ssize_t vertex_csv_parser(STREAM_T& fin,
@@ -363,20 +362,24 @@ ssize_t vertex_csv_parser(STREAM_T& fin,
         new vertex_unit_t<VertexData>[HUGESIZE]);
 
     while (fin.good() && (false == fin.eof())) {
+        // 读取CSV文件的一行
         fin.getline(sInput.get(), HUGESIZE);
         if ((false == fin.good()) || ('\0' == sInput[0])) {
             continue;
         }
 
         pLog = sInput.get();
+        // 划分CSV文件的一行
         pToken = strtok_r(sInput.get(), ",", &pSave);
         if (nullptr == pToken) {
             LOG(WARNING) << boost::format("can not extract source from (%s)") %
                                 pLog;
             continue;
         }
+        // 解析结点ID
         buffer[count].vid_ = strtoul(pToken, nullptr, 10);
 
+        // 解析结点数据
         if (false == decoder(&(buffer[count].vdata_), pSave)) {
             LOG(WARNING) << boost::format(
                                 "can not decode VertexData from (%s)") %

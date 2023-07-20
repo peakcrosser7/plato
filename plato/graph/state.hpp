@@ -159,8 +159,10 @@ void load_vertices_state_from_path (
     std::atomic<size_t> idx(0);
     std::vector<std::string> files = get_files(path);
 
+    // 发送结点数据函数
     auto __send = [&](bsp_send_callback_t<vertex_unit_t<T_MSG>> send) {
       auto parse_callback = [&](vertex_unit_t<T_MSG>* input, size_t size) {
+        // 遍历每个消息并发送至结点对应集群节点
         for (size_t i = 0; i < size; ++i) {
           send(partitioner->get_partition_id(input[i].vid_), input[i]);
         }
@@ -176,6 +178,7 @@ void load_vertices_state_from_path (
       }
     };
 
+    // 接收结点数据函数
     auto __recv = [&](int, bsp_recv_pmsg_t<vertex_unit_t<T_MSG>>& pmsg) {
       callback(std::move(*pmsg));
     };

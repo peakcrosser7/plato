@@ -62,8 +62,8 @@ class dcsc_t {
     using traits_ = typename std::allocator_traits<ALLOC>::template rebind_traits<adj_unit_t<EDATA>>;
 
   public:
-    // *******************************************************************************
-    // // required types & methods
+    // ******************************************************************************* //
+    // required types & methods
 
     using edata_t = EDATA;
     using partition_t = PART_IMPL;
@@ -86,7 +86,7 @@ class dcsc_t {
     template <typename EDGE_CACHE>
     int load_from_cache(const graph_info_t &graph_info, EDGE_CACHE &cache);
 
-    /// @brief 返回结点划分序列 get partitioner
+    /// @brief 返回结点分区序列 get partitioner
     std::shared_ptr<partition_t> partitioner(void) { return partitioner_; }
 
     // traverse interface
@@ -110,8 +110,7 @@ class dcsc_t {
      * */
     bool next_chunk(traversal_t traversal, size_t *chunk_size);
 
-    // *******************************************************************************
-    // //
+    // ******************************************************************************* //
 
     dcsc_t(std::shared_ptr<partition_t> partitioner,
            const allocator_type &alloc = ALLOC());
@@ -149,7 +148,7 @@ class dcsc_t {
     /// @brief 节点本地数据子图边数
     eid_t edges_;
 
-    /// @brief 结点划分序列
+    /// @brief 结点分区序列
     std::shared_ptr<partition_t> partitioner_;
     /// @brief 节点本地数据图邻接表边数组(DCSC行索引)
     std::shared_ptr<adj_unit_spec_t> adjs_;
@@ -236,7 +235,7 @@ dcsc_t<EDATA, PART_IMPL, ALLOC>::dcsc_t(dcsc_t &&other)
 /// @brief 遍历加载边信息(辅助函数)
 /// @param vertices 结点数
 /// @param reset_traversal 重置遍历的函数 bool:auto_release_是否自动释放
-/// @param foreach_dests 遍历边缓存操作终结点的函数 bsp_send_callback_t<vid_t>:向节点发送消息的回调函数
+/// @param foreach_dests 遍历边缓存操作目标结点的函数 bsp_send_callback_t<vid_t>:向节点发送消息的回调函数
 /// @param foreach_edges 遍历边缓存操作边信息的函数 bsp_send_callback_t<vid_t>:向节点发送消息的回调函数
 /// @return 成功为0, 反之非0
 template <typename EDATA, typename PART_IMPL, typename ALLOC>
@@ -272,12 +271,12 @@ int dcsc_t<EDATA, PART_IMPL, ALLOC>::load_from_traversal(
         opts.local_capacity_ = PAGESIZE;
         opts.batch_size_ = 1;
 
-        // 发送边的终结点
+        // 发送边的目标结点
         auto __send = [&](bsp_send_callback_t<vid_t> send) {
             foreach_dests(send);
         };
 
-        // 接收边的终结点
+        // 接收边的目标结点
         auto __recv = [&](int /*p_i*/, bsp_recv_pmsg_t<vid_t> &pmsg) {
             __sync_fetch_and_add(&index_.get()[*pmsg + 1], (eid_t)1);
             v_bitmap.set_bit(*pmsg);
@@ -422,7 +421,7 @@ int dcsc_t<EDATA, PART_IMPL, ALLOC>::load_from_cache(
         auto traversal = [&](size_t, edge_unit_spec_t *edge) {
             CHECK(edge->src_ < graph_info.vertices_);
             CHECK(edge->dst_ < graph_info.vertices_);
-            // 将边的终结点发送给边(源结点)所在分区对应的集群节点
+            // 将边的目标结点发送给边(源结点)所在分区对应的集群节点
             send(partitioner_->get_partition_id(edge->src_, edge->dst_),
                  edge->dst_);
             if (false == graph_info.is_directed_) { // cache friendly

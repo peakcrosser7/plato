@@ -35,7 +35,7 @@ namespace plato {
 struct vid_encoder_opts_t {
     /// @brief 源结点是否编码
     bool src_need_encode_ = true;
-    /// @brief 终结点是否编码
+    /// @brief 目标结点是否编码
     bool dst_need_encode_ = true;
 };
 

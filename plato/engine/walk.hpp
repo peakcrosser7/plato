@@ -433,12 +433,14 @@ public:
   std::shared_ptr<partition_t> partitioner(void)      { return partitioner_; }
 
 protected:
+  /// @brief 数据图信息
   graph_info_t                              graph_info_;
   
   STORAGE*                                  storage_;
 
   sample_state_t*                           sampler_;
 
+  /// @brief 结点分区
   std::shared_ptr<partition_t>              partitioner_;
 
   template <typename... Args>

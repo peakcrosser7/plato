@@ -152,10 +152,14 @@ struct adj_unit_list_t {
         : begin_(begin), end_(end) {}
 };
 
+/// @brief 结点数据单元
+/// @tparam VDATA_T 结点数据类型
 template <typename VDATA_T, typename = typename std::enable_if<
                                 sizeof(VDATA_T) != 0, std::true_type>::type>
 struct vertex_unit_t {
+    /// @brief 结点ID
     vid_t vid_;
+    /// @brief 结点数据
     VDATA_T vdata_;
 
     template <typename Ar>

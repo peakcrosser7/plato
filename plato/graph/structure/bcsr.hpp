@@ -475,7 +475,7 @@ int bcsr_t<EDATA, PART_IMPL, ALLOC>::load_from_cache(
 
             if (graph_info.is_directed_) {  // 有向图
                 if (is_outgoing) {  // 出边方向
-                    // 将边的源结点发送给边(终结点)所在分区对应的集群节点
+                    // 将边的源结点发送给边(目标结点)所在分区对应的集群节点
                     send(partitioner_->get_partition_id(edge->src_, edge->dst_),
                          edge->src_);
                 } else {    // 入边方向

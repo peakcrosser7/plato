@@ -143,7 +143,7 @@ R aggregate_message(
     // 发送:每个集群节点遍历本地(mirror)结点及其邻接表计算生成消息,发送消息给master结点所在节点分区
     //      DCSC以边的src划分master结点,因此遍历的本地结点均为mirror结点,而邻接表中的结点均为master结点
     // 接收:master结点接收来自各个mirror结点所在节点分区的消息,进行归约并更新master结点属性,作为下一轮激活结点
-    //      下一轮的激活结点就是master结点为源结点的边的终结点,其mirror结点均在此集群节点中
+    //      下一轮的激活结点就是master结点为源结点的边的目标结点,其mirror结点均在此集群节点中
     int rc = fine_grain_bsp<mepa_ag_message_t<MSG>>(
         bsp_send, bsp_recv, bsp_opts,
         // 接收前设置归约值
@@ -374,7 +374,7 @@ R broadcast_message(ACTIVE &actives, SPREAD_FUNC &&spread_task,
     // 发送:每个集群节点遍历本地激活的master结点生成消息,发送消息给其mirror结点
     //      BCSR以边的dst划分master结点,因此mirror结点可能在其他所有集群节点,均要发送,即以环形顺序广播消息
     // 接收:每个集群节点的mirror结点接收来自master结点所在节点分区的消息,遍历其邻接表,更新邻结点属性并作为下一轮结点激活
-    //      下一轮的激活结点是以mirror结点为源结点的边的终结点,其master结点均在此集群节点中
+    //      下一轮的激活结点是以mirror结点为源结点的边的目标结点,其master结点均在此集群节点中
     int rc = broadcast<MSG>(__send, __recv, bc_opts, [&](void) {
         preducer = &reducer_vec[omp_get_thread_num()];
     });

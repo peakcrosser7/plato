@@ -47,10 +47,11 @@ DEFINE_uint32(epoch,       5,      "how many epoch should perform");
 DEFINE_uint32(step,        5,      "steps per epoch");
 DEFINE_double(rate,        0.1,    "start 'rate'% walker per one bsp, reduce memory consumption");
 
+// 用于临时存放元路径结点 
 static std::vector<uint32_t> _metapath;
 
 /**
- * @brief validator.
+ * @brief validator. 检查字符串是否不为空
  * @param value
  * @return
  */
@@ -60,13 +61,14 @@ static bool string_not_empty(const char*, const std::string& value) {
 }
 
 /**
- * @brief
+ * @brief 检测元路径是否有效性
  * @param value
  * @return
  */
 static bool metapath_validator(const char*, const std::string& value) {
   if (0 == value.length()) { return false; }
 
+  // 划分元路径中的结点
   std::vector<std::string> splits;
   boost::split(splits, value, boost::is_any_of("-"));
 
@@ -75,6 +77,7 @@ static bool metapath_validator(const char*, const std::string& value) {
     _metapath.emplace_back((uint8_t)id);
   }
 
+  // 判断转换后的元路径结点个数不为0
   if (0 == _metapath.size()) {
     return false;
   }
@@ -95,7 +98,7 @@ void print_mem_info(std::string notice) {
 }
 
 /**
- * @brief
+ * @brief 检测整数非零
  * @tparam T
  * @param value
  * @return
@@ -343,10 +346,12 @@ void biased_walk(void) {
     LOG(INFO) << "load edges cache cost: " << watch.show("t1") / 1000.0 << "s";
   }
 
+  // 结点类型稀疏数据
   plato::sparse_state_t<uint32_t, partition_t> v_types(graph_info.vertices_, partitioner);
   plato::load_vertices_state_from_path<uint32_t>(
     FLAGS_types, plato::edge_format_t::CSV,
     partitioner, plato::uint32_t_decoder,
+    // 将结点的类型插入到类型表中
     [&](plato::vertex_unit_t<uint32_t>&& unit) {
       v_types.insert(unit.vid_, unit.vdata_);
     });

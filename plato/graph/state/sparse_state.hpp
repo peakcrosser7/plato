@@ -44,6 +44,8 @@
 
 namespace plato {
 
+/// @brief 稀疏状态数据(基于哈希表实现)
+/// @tparam T 数据类型
 template <typename T, typename PART_IMPL, typename HASH = cuckoo_vid_hash, typename KEY_EQUAL = std::equal_to<vid_t>,
   typename ALLOC = std::allocator<std::pair<const vid_t, T>>, typename BITMAP = bitmap_t<>>
 class sparse_state_t {
@@ -196,6 +198,7 @@ protected:
   using locked_table_t = typename cuckoomap_t::locked_table;
   using iterator_t     = typename locked_table_t::iterator;
 
+  /// @brief 数据哈希表
   cuckoomap_t data_;
   std::shared_ptr<partition_t> partitioner_;
   std::unique_ptr<locked_table_t> lock_table_;

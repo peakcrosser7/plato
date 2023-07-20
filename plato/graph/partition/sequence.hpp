@@ -104,7 +104,7 @@ void __check_consistency(const std::vector<vid_t> &offset_) {
 
 } // namespace
 
-/// @brief 序列划分视图 sequence partition view
+/// @brief 序列分区视图 sequence partition view
 class sequence_v_view {
   public:
 
@@ -158,7 +158,7 @@ class sequence_v_view {
  **/
 
 // edge belong to source node's partition
-/// @brief 根据边的源结点的划分序列
+/// @brief 根据边的源结点的分区序列
 class sequence_balanced_by_source_t {
   public:
 
@@ -168,7 +168,7 @@ class sequence_balanced_by_source_t {
     // get edge's partition
     /// @brief  根据源结点获取边所在的子图分区(集群节点) get edge's partition
     /// @param src 源结点
-    /// @param dst 终结点
+    /// @param dst 目标结点
     /// @return 所在的子图分区(集群节点)
     inline int get_partition_id(vid_t src, vid_t /*dst*/) {
         return get_partition_id(src);
@@ -232,15 +232,15 @@ class sequence_balanced_by_source_t {
 };
 
 // edge belong to destination node's partition
-/// @brief 根据边的终结点的划分序列
+/// @brief 根据边的目标结点的分区序列
 class sequence_balanced_by_destination_t {
   public:
     // ******************************************************************************* //
     // required types & methods
 
-    /// @brief  根据终结点获取边所在的子图分区(集群节点) get edge's partition
+    /// @brief  根据目标结点获取边所在的子图分区(集群节点) get edge's partition
     /// @param src 源结点
-    /// @param dst 终结点
+    /// @param dst 目标结点
     /// @return 所在的子图分区(集群节点)
     inline int get_partition_id(vid_t /*src*/, vid_t dst) {
         return get_partition_id(dst);
