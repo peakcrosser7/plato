@@ -71,24 +71,18 @@ int main(int argc, char** argv) {
     plato::dummy_decoder<plato::empty_t>, FLAGS_alpha, FLAGS_part_by_in);
 
   plato::bitmap_t<> good_vertices(graph_info.max_v_i_ + 1);
-  std::atomic<uint32_t> good_num(0);
   plato::load_vertices_state_from_path<plato::empty_t>(
     FLAGS_input_goods, plato::edge_format_t::CSV,
     graph.first.partitioner(), plato::dummy_decoder<plato::empty_t>,
     [&](plato::vertex_unit_t<plato::empty_t>&& unit) {
       good_vertices.set_bit(unit.vid_);
-      good_num.fetch_add(1);
     });
-  
-  if(good_num.load() == 0 && 0 == cluster_info.partition_id_) {
-    LOG(WARNING) << "trustrank terminated: load 0 good vertices from input file";
-    return 0;
-  }
+  good_vertices.sync();
 
   plato::algo::trustrank_opts_t opts;
-  opts.iteration_    = FLAGS_iterations;
-  opts.damping_      = FLAGS_damping;
-  opts.seed_num_    = FLAGS_seed_num;
+  opts.iteration_     = FLAGS_iterations;
+  opts.damping_       = FLAGS_damping;
+  opts.seed_num_      = FLAGS_seed_num;
   opts.select_method_ = FLAGS_select_method;
 
   auto ranks = plato::algo::trustrank(graph.second, graph.first, 

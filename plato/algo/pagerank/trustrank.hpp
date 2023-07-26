@@ -6,8 +6,9 @@
 #include <cstdlib>
 #include <type_traits>
 #include <vector>
-#include <numeric> 
+#include <random>
 #include <algorithm>
+#include <unordered_set>
 
 #include "glog/logging.h"
 #include "boost/sort/sort.hpp"
@@ -38,6 +39,38 @@ struct rank_pair_t {
 };
 
 /*
+ * generate a vector of rank pairs by PageRank
+ *
+ * \tparam GRAPH  graph type, with incoming edges or outgoing edges
+ *
+ * \param graph       the graph
+ * \param graph_info  base graph-info
+ *
+ * \return
+ *      each vertex's id and its rank value in a vector
+ **/
+template<typename GRAPH>
+std::vector<rank_pair_t> generate_rank_pairs(GRAPH& graph, const graph_info_t& graph_info) {
+  auto ranks = pagerank(graph, graph_info);
+
+  sequence_v_view view = graph.partitioner()->self_v_view();
+  std::vector<double> seed_ranks(graph_info.max_v_i_ + 1);
+  #pragma omp parallel for
+  for (vid_t v_i = view.start(); v_i < view.end(); ++v_i) {
+    seed_ranks[v_i] = ranks[v_i];
+  }
+  allreduce(MPI_IN_PLACE, seed_ranks.data(), seed_ranks.size(), get_mpi_data_type<double>(), MPI_SUM, MPI_COMM_WORLD);
+  
+  std::vector<rank_pair_t> rank_pairs(graph_info.max_v_i_ + 1);
+  #pragma omp parallel for
+  for(vid_t v_i = 0; v_i < graph_info.max_v_i_ + 1; ++v_i) {
+    rank_pairs[v_i] = rank_pair_t{ v_i, seed_ranks[v_i] };
+  }
+
+  return rank_pairs;
+}
+
+/*
  * select good seeds of TrustRank
  *
  * \tparam INCOMING      graph type, with incoming edges
@@ -46,7 +79,7 @@ struct rank_pair_t {
  * \param in_edges       incoming edges, dcsc, ...
  * \param out_edges      outgoing edges, bcsr, ...
  * \param graph_info     base graph-info
- * \param good_vertices  a bitmap containing good vertices
+ * \param good_vertices  a bitmap containing all good vertices
  * \param opts           trustrank options
  *
  * \return
@@ -58,36 +91,20 @@ bitmap_t<> select_good_seeds(
   OUTGOING& out_edges,
   const graph_info_t& graph_info,
   const bitmap_t<>& good_vertices,
-  trustrank_opts_t& opts) {
+  const trustrank_opts_t& opts) {
 
   bitmap_t<> good_seeds(graph_info.max_v_i_ + 1);
   
   // use good vertices as good seeds if number of vertices < seed_num_
   if (graph_info.max_v_i_ + 1 <= opts.seed_num_) {
-    opts.seed_num_ = graph_info.max_v_i_ + 1;
     good_seeds.copy_from(good_vertices);
     return good_seeds;
   }
 
   if (opts.select_method_ != 2) {   // use PageRank or Inverse PageRank to select
-    std::vector<rank_pair_t> rank_pairs(graph_info.max_v_i_ + 1);
-    if (opts.select_method_ == 0) {
-      auto seed_ranks = pagerank<INCOMING>(in_edges, graph_info);
-      seed_ranks.template foreach<int>(
-        [&](vid_t v_i, double* pval) {
-          rank_pairs[v_i] = rank_pair_t{ v_i, *pval };
-          return 0;
-        }
-      );
-    } else {
-      auto seed_ranks = pagerank<OUTGOING>(out_edges, graph_info);
-      seed_ranks.template foreach<int>(
-        [&](vid_t v_i, double* pval) {
-          rank_pairs[v_i] = rank_pair_t{ v_i, *pval };
-          return 0;
-        }
-      );
-    }
+    std::vector<rank_pair_t> rank_pairs = (opts.select_method_ == 0 ? 
+                                          generate_rank_pairs(in_edges, graph_info) :
+                                          generate_rank_pairs(out_edges, graph_info));
 
     boost::sort::pdqsort(rank_pairs.begin(), rank_pairs.end(), 
       [](const rank_pair_t& a, const rank_pair_t& b) {
@@ -95,6 +112,7 @@ bitmap_t<> select_good_seeds(
       });
 
     // select good seed vertices from the top seed_num_ ranked nodes
+    #pragma omp parallel for
     for (uint32_t i = 0; i < opts.seed_num_; ++i) {
       vid_t v_i = rank_pairs[i].v_i;
       // good seed must be a good vertex
@@ -103,51 +121,27 @@ bitmap_t<> select_good_seeds(
       }
     }
   } else {  // select randomly
-    sequence_v_view view = in_edges.partitioner()->self_v_view();
-    vid_t start = view.start(), end = view.end();
-    std::vector<vid_t> vertices(end - start);
-    std::iota(vertices.begin(), vertices.end(), start);
-    // shuffle vertices the partition owned
-    std::random_shuffle(vertices.begin(), vertices.end());
+    // use the sum of seeds as the shared seed among processes to select the same random numbers
+    unsigned local_rd = std::random_device()();
+    unsigned rd_sum;
+    MPI_Allreduce(&local_rd, &rd_sum, 1, get_mpi_data_type<unsigned>(), MPI_SUM, MPI_COMM_WORLD);
 
-    auto& cluster_info = plato::cluster_info_t::get_instance();
-    uint32_t partitions = cluster_info.partitions_, pid = cluster_info.partition_id_;
-    std::vector<vid_t> seeds(opts.seed_num_, 0);
-    std::vector<uint32_t> seed_counts(partitions, 0);
+    std::default_random_engine generator(rd_sum);
+    std::uniform_int_distribution<vid_t> distribution(0, graph_info.max_v_i_);
 
-    uint32_t psize = opts.seed_num_ / partitions;
-    // std::min() to avoid the partition with fewer vertices than to be selected
-    uint32_t count = std::min(end - start, psize + (pid < (opts.seed_num_ % partitions)));
-    uint32_t offset = psize * pid + std::min(pid, opts.seed_num_ % partitions);
-    // select "count" vertices as seeds in the partition
-    std::copy(vertices.begin(), vertices.begin() + count, seeds.begin() + offset); 
-    seed_counts[pid] = count;
-
-    // synchronize the selected seeds and its count for each partition
-    allreduce(MPI_IN_PLACE, seeds.data(), seeds.size(), get_mpi_data_type<vid_t>(), MPI_SUM, MPI_COMM_WORLD);
-    MPI_Allreduce(MPI_IN_PLACE, seed_counts.data(), seed_counts.size(), get_mpi_data_type<uint32_t>(), MPI_SUM, MPI_COMM_WORLD);
-    
-    uint32_t seed_num = std::accumulate(seed_counts.begin(), seed_counts.end(), 0U);
-    if (seed_num == opts.seed_num_) {
-      for(vid_t v_i: seeds) {
+    std::unordered_set<vid_t> seed_set;   // record select seeds
+    while (seed_set.size() < opts.seed_num_) {
+      vid_t v_i = distribution(generator);
+      if (seed_set.count(v_i) == 0) {
+        seed_set.insert(v_i);
+        // good seed must be a good vertex
         if (good_vertices.get_bit(v_i)) {
           good_seeds.set_bit(v_i);
         }
       }
-    } else {  // when the number of selected seeds in some partitions is not enough
-      uint32_t offset = 0;
-      for (uint32_t p = 0; p < partitions; ++p) {
-        for (uint32_t i = 0; i < seed_counts[p]; ++i) {
-          vid_t v_i = seeds[offset + i];
-          if (good_vertices.get_bit(v_i)) {
-            good_seeds.set_bit(v_i);
-          }
-        }
-        offset += psize + (p < (opts.seed_num_ % partitions));
-      }
-      opts.seed_num_ = seed_num;
     }
   }
+
   return good_seeds;
 }
 
@@ -160,7 +154,7 @@ bitmap_t<> select_good_seeds(
  * \param in_edges       incoming edges, dcsc, ...
  * \param out_edges      outgoing edges, bcsr, ...
  * \param graph_info     base graph-info
- * \param good_vertices  a bitmap containing good vertices
+ * \param good_vertices  a bitmap containing all good vertices
  * \param opts           trustrank options
  *
  * \return
@@ -172,7 +166,7 @@ dense_state_t<double, typename INCOMING::partition_t> trustrank (
   OUTGOING& out_edges,
   const graph_info_t& graph_info,
   const bitmap_t<>& good_vertices,
-  trustrank_opts_t& opts = trustrank_opts_t()) {
+  const trustrank_opts_t& opts = trustrank_opts_t()) {
 
   using rank_state_t   = plato::dense_state_t<double, typename INCOMING::partition_t>;
   using context_spec_t = plato::mepa_ag_context_t<double>;
@@ -200,7 +194,7 @@ dense_state_t<double, typename INCOMING::partition_t> trustrank (
   rank_state_t curt_rank = engine.template alloc_v_state<double>();
   rank_state_t next_rank = engine.template alloc_v_state<double>();
 
-  double init_dist = 1./opts.seed_num_;
+  double init_dist = 1. / good_seeds.count();
   double delta = curt_rank.template foreach<double> (
     [&](plato::vid_t v_i, double* pval) {
       *pval = (good_seeds.get_bit(v_i) ? init_dist : 0.0);
