@@ -26,7 +26,7 @@ struct trustrank_opts_t {
   double   damping_       = 0.85;  // the damping factor
   uint32_t seed_num_      = 100;   // number of seeds
   uint32_t select_method_ = 0;     // method of selecting seeds:
-                                  // 0.PageRank; 1.Inverse PageRank; 2.Random
+                                  // 0.Inverse PageRank; 1.PageRank; 2.Random
   double   eps_           = 0.001; // the calculation will be considered complete if the sum of
                                   // the difference of the 'rank' value between iterations 
                                   // changes less than 'eps'. if 'eps' equals to 0, pagerank will be
@@ -101,10 +101,10 @@ bitmap_t<> select_good_seeds(
     return good_seeds;
   }
 
-  if (opts.select_method_ != 2) {   // use PageRank or Inverse PageRank to select
+  if (opts.select_method_ != 2) {   // use Inverse PageRank or PageRank to select
     std::vector<rank_pair_t> rank_pairs = (opts.select_method_ == 0 ? 
-                                          generate_rank_pairs(in_edges, graph_info) :
-                                          generate_rank_pairs(out_edges, graph_info));
+                                          generate_rank_pairs(out_edges, graph_info) :
+                                          generate_rank_pairs(in_edges, graph_info));
 
     boost::sort::pdqsort(rank_pairs.begin(), rank_pairs.end(), 
       [](const rank_pair_t& a, const rank_pair_t& b) {

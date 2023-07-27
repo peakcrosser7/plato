@@ -32,7 +32,7 @@ DEFINE_double(
 DEFINE_uint32(
   select_method, 0,       
   "method of seed vertices:"
-  "0.PageRank; 1.Inverse PageRank; 2.Random"
+  "0.Inverse PageRank; 1.PageRank; 2.Random"
 );
 
 bool string_not_empty(const char*, const std::string& value) {
@@ -78,6 +78,12 @@ int main(int argc, char** argv) {
       good_vertices.set_bit(unit.vid_);
     });
   good_vertices.sync();
+  if (good_vertices.count() == 0) {
+    if (0 == cluster_info.partition_id_) {
+      LOG(WARNING) << "trustrank terminated: load 0 good vertices from input file";
+    }
+    return 0;
+  }
 
   plato::algo::trustrank_opts_t opts;
   opts.iteration_     = FLAGS_iterations;
