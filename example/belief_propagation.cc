@@ -13,11 +13,20 @@
 #include "plato/graph/graph.hpp"
 #include "plato/algo/bp/belief_propagation.hpp"
 
-DEFINE_string(input_factors, "", "input factor vertices file, in csv format");
-DEFINE_string(output,      "",      "output directory");
-DEFINE_bool(part_by_in,    false,   "partition by in-degree");
-DEFINE_int32(alpha,        -1,      "alpha value used in sequence balance partition");
-DEFINE_uint64(iterations,  100,     "number of iterations");
+DEFINE_string(input_factors,  "",      "input factor vertices file, in csv format");
+DEFINE_string(output,         "",      "output directory");
+DEFINE_bool(part_by_in,       false,   "partition by in-degree");
+DEFINE_int32(alpha,           -1,      "alpha value used in sequence balance partition");
+DEFINE_uint64(iterations,     100,     "number of iterations");
+
+DEFINE_double(
+  eps,
+  0.001,
+  "the calculation will be considered complete if the sum of "
+  "the difference of the 'belief' value between iterations changes "
+  "less than 'eps'. if 'eps' equals to 0, belief propagation will "
+  "be force to execute 'iteration' epochs."
+);
 
 bool string_not_empty(const char*, const std::string& value) {
   if (0 == value.length()) { return false; }
@@ -33,17 +42,18 @@ void init(int argc, char** argv) {
   google::LogToStderr();
 }
 
-using bp_prob_t        = plato::algo::bp_prob_t;
 using bp_dist_size_t   = plato::algo::bp_dist_size_t;
+using bp_prob_t        = plato::algo::bp_prob_t;
+using bp_dist_t        = plato::algo::bp_dist_t;
 using bp_factor_data_t = plato::algo::bp_factor_data_t;
 using bp_edata_t       = plato::algo::bp_edata_t;
 using bp_bcsr_t        = plato::algo::bp_bcsr_t<>;
 
 template <template<typename> class VCACHE>
-std::shared_ptr<VCACHE<bp_factor_data_t>> load_factors_cache(const std::string& path) {
+std::shared_ptr<VCACHE<bp_factor_data_t>> load_factors_cache(const std::string& path, plato::edge_format_t format) {
 
   auto pvcache = plato::load_vertices_cache<bp_factor_data_t, VCACHE>(
-    path, plato::edge_format_t::CSV, [&](bp_factor_data_t* item, char* content) {
+    path, format, [&](bp_factor_data_t* item, char* content) {
       char* pDists = nullptr;
       char* pVars = nullptr;
       pVars = strtok_r(content, ",", &pDists);
@@ -139,6 +149,7 @@ template <template<typename, typename> class ECACHE = plato::edge_block_cache_t,
 std::shared_ptr<bp_bcsr_t> create_bp_bcsr_seq_from_path(
     plato::graph_info_t*  pgraph_info,
     const std::string&    path,
+    plato::edge_format_t  format,
     int                   alpha = -1,
     bool                  use_in_degree = false) {
 
@@ -147,7 +158,7 @@ std::shared_ptr<bp_bcsr_t> create_bp_bcsr_seq_from_path(
 
   watch.mark("t0");
 
-  auto pvcache = load_factors_cache<VCACHE>(path);
+  auto pvcache = load_factors_cache<VCACHE>(path, format);
 
   watch.mark("t1");
 
@@ -211,8 +222,17 @@ int main(int argc, char** argv) {
 
   watch.mark("t0");
 
-  // init graph
   plato::graph_info_t graph_info;
+  auto pdcsc = create_bp_bcsr_seq_from_path(
+    &graph_info, FLAGS_input_factors, plato::edge_format_t::CSV,
+    FLAGS_alpha, FLAGS_part_by_in
+  );
+
+  plato::algo::bp_opts_t opts;
+  opts.iteration_ = FLAGS_iterations;
+  opts.eps_       = FLAGS_eps;
+
+
 
   return 0;
 }

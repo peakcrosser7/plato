@@ -15,6 +15,14 @@
 
 namespace plato { namespace algo {
 
+struct bp_opts_t {
+  uint32_t iteration_ = 100;   // number of iterations
+  double   eps_       = 0.001; // the calculation will be considered complete if the sum of
+                              // the difference of the 'rank' value between iterations 
+                              // changes less than 'eps'. if 'eps' equals to 0, pagerank will be
+                              // force to execute 'iteration' epochs.
+};
+
 using bp_dist_size_t = uint64_t;
 using bp_prob_t      = double;
 
@@ -24,8 +32,8 @@ struct bp_factor_data_t {
 };
 
 struct bp_edata_t {
-  uint32_t idx_;
-  bp_prob_t* cur_msg_ = nullptr;
+  uint32_t   idx_;
+  bp_prob_t* cur_msg_  = nullptr;
   bp_prob_t* next_msg_ = nullptr;
 
   template<typename Ar>
@@ -84,9 +92,58 @@ int traverse_factors_cache_bsp (
   return traverse_cache_bsp(pvacahe, traverse_task, recv_task, 1, opts);
 }
 
+struct bp_dist_t {
+  bp_dist_size_t size_   = 0;
+  bp_prob_t*     values_ = nullptr;
+
+  bp_dist_t() = default;
+  bp_dist_t(bp_prob_t* values, bp_dist_size_t size): values_(values), size_(size) {}
+
+  bp_dist_t(const bp_dist_t&) = delete;
+  bp_dist_t& operator=(const bp_dist_t&) = delete;
+};
+
+template <typename PART_IMPL, typename ALLOC = mmap_allocator_t<bp_dist_t>, typename BITMAP = bitmap_t<>>
+class bp_dense_dists_t: public dense_state_t<bp_dist_t, PART_IMPL, ALLOC, BITMAP> {
+public:
+  bp_dense_dists_t(const bp_dist_size_t* dist_sizes, vid_t max_v_i, std::shared_ptr<partition_t> partitioner) : 
+      dense_state_t<bp_dist_t, PART_IMPL, ALLOC, BITMAP>(max_v_i, partitioner), buf_allocator_() {
+    dist_buf_size_ = 0;
+    #pragma omp parallel for reduction(+:dist_buf_size_)
+    for (int i = 0; i <= max_v_i; ++i) {
+        dist_buf_size_ += dist_sizes[i];
+    }
+    dist_buf_ = buf_allocator_.allocate(dist_buf_size_);
+    std::fill(dist_buf_, dist_buf_ + max_v_i + 1, 1.0);
+    
+    bp_dist_t  dist_idx = 0;
+    #pragma omp parallel for
+    for (vid_t i = 0; i <= max_v_i; ++i) {
+      bp_dist_size_t dist_size = dist_sizes[i];
+      if (dist_size != 0) {
+        data_[i] = bp_dist_t(dist_buf_[__sync_fetch_and_add(&dist_idx, dist_size)], dist_size);
+      }
+    }
+  }
+
+  ~bp_dense_dists_t() {
+    if (nullptr != dist_buf_) {
+      buf_allocator_.deallocate(dist_buf_, dist_buf_size_);
+    }
+  }
+
+private:
+  using buf_traits_ = typename std::allocator_traits<ALLOC>::template rebind_traits<bp_prob_t>;
+  using buf_allocator_type = typename buf_traits_::allocator_type;
+
+  buf_allocator_type buf_allocator_;
+  bp_dist_size_t dist_buf_size_;
+  bp_prob_t* dist_buf_;
+};
+
 enum class bp_vertex_type_t {
   VARIABLE = 0,
-  FACTOR = 1
+  FACTOR   = 1
 };
 
 template <typename ALLOC = std::allocator<adj_unit_t<bp_edata_t>>>
@@ -168,7 +225,6 @@ public:
     return 0;
   }
 
-  
   template <typename VCACHE>
   int init_states_from_factors_cache(VCACHE& pvcache) {
 
@@ -217,7 +273,7 @@ public:
         },
         [&](plato::bsp_recv_pmsg_t<dist_size_msg_t>& pmsg) {
           plato::vid_t v_i = pmsg->v_i_;
-          CHECK(this->bitmap_->get_bit(v_i)) << "vertex " << v_i << " is not in the graph";
+          CHECK(bitmap_->get_bit(v_i)) << "vertex " << v_i << " is not in the graph";
           if (pmsg->v_type_ == bp_vertex_type_t::VARIABLE) {
             CHECK(local_factors_map_->get_bit(v_i) == 0) << "vertex " << v_i << " is a factor vertex";
             if (local_var_map.get_bit(v_i) != 0) {
@@ -233,7 +289,7 @@ public:
           __sync_fetch_and_add(&local_dist_size_, pmsg->dist_size_);
         });
     }
-    allreduce(MPI_IN_PLACE, dist_sizes_.get(), vertices_, get_mpi_data_type<bp_dist_size_t>(), MPI_SUM, MPI_COMM_WORLD);
+    // allreduce(MPI_IN_PLACE, dist_sizes_.get(), vertices_, get_mpi_data_type<bp_dist_size_t>(), MPI_SUM, MPI_COMM_WORLD);
 
     {
       dist_ptr_allocator_t __alloc(allocator_);
@@ -268,8 +324,8 @@ public:
     }
 
     {
-      msg_buf_p_.reset(new thread_local_buffer);
-      auto msg_buf_reset_defer = plato::defer([msg_buf_p_] { msg_buf_p_.reset(); });
+      msg_bsp_buf_p_.reset(new thread_local_buffer);
+      auto msg_buf_reset_defer = plato::defer([msg_bsp_buf_p_] { msg_bsp_buf_p_.reset(); });
       traverse_factors_cache_bsp(pvcache, 
         [&] (plato::vertex_unit_t<bp_factor_data_t>* v_data, plato::bsp_send_callback_t<dist_msg_t> send) {
           dist_msg_t msg;
@@ -290,25 +346,6 @@ public:
     }
 
     return 0;
-    
-    // dist_mmap_p.reset((bp_prob_t*)
-    //   mmap(nullptr, sizeof(bp_prob_t) * local_dist_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0),
-    //   plato::mmap_deleter{sizeof(bp_prob_t) * local_dist_size});
-    // CHECK(MAP_FAILED != vars_dist_mmap_p.get())
-    //   << boost::format("WARNING: mmap failed, err code: %d, err msg: %s") % errno % strerror(errno) << " local_dist_size: " << local_dist_size;
-    // bp_mmap_p.reset((bp_prob_t*)
-    //   mmap(nullptr, sizeof(bp_prob_t) * local_dist_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0),
-    //   plato::mmap_deleter{sizeof(bp_prob_t) * local_dist_size});
-    // CHECK(MAP_FAILED != bp_mmap_p.get())
-    //   << boost::format("WARNING: mmap failed, err code: %d, err msg: %s") % errno % strerror(errno) << " local_dist_size: " << local_dist_size;
-    // msg_ptr_mmap_p.reset((bp_prob_t**)
-    //   mmap(nullptr, sizeof(bp_prob_t*) * graph.edges(), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0),
-    //   plato::mmap_deleter{sizeof(bp_prob_t*) * graph.edges()});
-    // CHECK(MAP_FAILED != vars_dist_mmap_p.get())
-    //   << boost::format("WARNING: mmap failed, err code: %d, err msg: %s") % errno % strerror(errno) << " local_dist_size: " << local_dist_size;
-
-    // plato::dense_state_t<bp_vertex_state_t, GRAPH::partition_t> states(graph_info.max_v_i_, partitioner);
-
   }
   
   template <typename ECACHE, typename VCACHE> 
@@ -318,6 +355,17 @@ public:
       return rc;
     }
     return init_states_from_factors_cache(pvcache);
+  }
+
+  
+  bp_dense_dists_t<partition_t> alloc_dist_state() const {
+    return bp_dense_dists_t<partition_t>(dist_sizes_.get(), vertices_ - 1, partitioner_);
+  }
+
+  void alloc_msg_buf() {
+    if (msg_allocated_) {
+      
+    }
   }
 
 private:
@@ -337,19 +385,15 @@ protected:
   std::shared_ptr<bp_dist_size_t> dist_sizes_;
   std::shared_ptr<bp_prob_t*>     dists_;
 
+  bool msg_allocated_ = false;
+  bp_dist_size_t local_msg_size_ = 0;
 
-  // std::shared_ptr<bp_dist_size_t> vars_dist_mmap_p;
-  // std::shared_ptr<bp_prob_t> dist_mmap_p;
-  // std::shared_ptr<bp_prob_t> bp_mmap_p;
-  // std::shared_ptr<bp_prob_t*> msg_ptr_mmap_p;
-  // std::shared_ptr<bp_prob_t> msg_mmap_p;
-  // std::unique_ptr<thread_local_buffer> msg_buffer_p;
 private:
   using dist_buf_allocator_t = typename traits_::template rebind_alloc<bp_prob_t>;
   using dist_buf_traits_     = typename traits_::template rebind_traits<bp_prob_t>;
   using dist_buf_pointer     = typename dist_buf_traits_::pointer;
 
-  std::unique_ptr<plato::thread_local_buffer> msg_buf_p_;
+  static std::unique_ptr<plato::thread_local_buffer> msg_bsp_buf_p_;
 
   struct dist_size_msg_t {
     vid_t v_i_;
@@ -358,14 +402,14 @@ private:
   };
 
   struct dist_msg_t {
-    vid_t v_i_;
-    bp_dist_size_t size_;
-    bp_prob_t* dist_ = nullptr;
+    vid_t          v_i_;
+    bp_dist_size_t size_ = 0;
+    bp_prob_t*     dist_ = nullptr;
 
     template<typename Ar>
     void serialize(Ar &ar) {
       if (!dist_) {
-        dist_ = (bp_prob_t*)msg_buf_p_->local();
+        dist_ = (bp_prob_t*)msg_bsp_buf_p_->local();
       }
       ar & v_i_;
       ar & size_;
@@ -376,8 +420,33 @@ private:
   };
 
   std::shared_ptr<bp_prob_t> dists_buf_;
+
 };
 
+template <typename ALLOC>
+bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
+    bp_bcsr_t<ALLOC>& graph,
+    const graph_info_t& graph_info,
+    const bp_opts_t& opts = bp_opts_t()) {
+  
+  using belief_state_t = bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t>;
+  using adj_unit_list_spec_t = typename bp_bcsr_t<ALLOC>::adj_unit_list_spec_t;
+
+  plato::stop_watch_t watch;
+  auto& cluster_info = plato::cluster_info_t::get_instance();
+
+  belief_state_t curt_belief = graph.alloc_dist_state();
+  belief_state_t next_belief = graph.alloc_dist_state();
+
+  double delta = curt_belief.template foreach<double> (
+    [&] (plato::vid_t v_i, bp_dist_t* dval) {
+      return 1.0 * dval->size_;
+    }
+  )
+
+
+
+}
 
 }}  // namespace algo, namespace plato
 
