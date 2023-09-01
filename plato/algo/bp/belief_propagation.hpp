@@ -32,9 +32,8 @@ struct bp_factor_data_t {
 };
 
 struct bp_edata_t {
-  uint32_t   idx_;
-  bp_prob_t* cur_msg_  = nullptr;
-  bp_prob_t* next_msg_ = nullptr;
+  uint32_t       idx_;
+  bp_dist_size_t msg_offset_ = 0;
 
   template<typename Ar>
   void serialize(Ar &ar) {
@@ -103,32 +102,23 @@ struct bp_dist_t {
   bp_dist_t& operator=(const bp_dist_t&) = delete;
 };
 
-template <typename PART_IMPL, typename ALLOC = mmap_allocator_t<bp_dist_t>, typename BITMAP = bitmap_t<>>
-class bp_dense_dists_t: public dense_state_t<bp_dist_t, PART_IMPL, ALLOC, BITMAP> {
+template <typename PART_IMPL, typename ALLOC = mmap_allocator_t<bp_dist_size_t>, typename BITMAP = bitmap_t<>>
+class bp_dense_dists_t: public dense_state_t<bp_dist_size_t, PART_IMPL, ALLOC, BITMAP> {
 public:
-  bp_dense_dists_t(const bp_dist_size_t* dist_sizes, vid_t max_v_i, std::shared_ptr<partition_t> partitioner) : 
-      dense_state_t<bp_dist_t, PART_IMPL, ALLOC, BITMAP>(max_v_i, partitioner), buf_allocator_() {
-    dist_buf_size_ = 0;
-    #pragma omp parallel for reduction(+:dist_buf_size_)
-    for (int i = 0; i <= max_v_i; ++i) {
-        dist_buf_size_ += dist_sizes[i];
-    }
-    dist_buf_ = buf_allocator_.allocate(dist_buf_size_);
-    std::fill(dist_buf_, dist_buf_ + max_v_i + 1, 1.0);
+  bp_dense_dists_t(const bp_dist_size_t* dist_offsets, vid_t max_v_i, std::shared_ptr<partition_t> partitioner) : 
+      dense_state_t<bp_dist_size_t, PART_IMPL, ALLOC, BITMAP>(max_v_i + 1, partitioner), buf_allocator_() {
+    dist_buf_ = buf_allocator_.allocate(dist_offsets[max_v_i + 1]);
+    std::fill(dist_buf_, dist_buf_ + dist_offsets[max_v_i + 1], 1.0);
     
-    bp_dist_t  dist_idx = 0;
     #pragma omp parallel for
-    for (vid_t i = 0; i <= max_v_i; ++i) {
-      bp_dist_size_t dist_size = dist_sizes[i];
-      if (dist_size != 0) {
-        data_[i] = bp_dist_t(dist_buf_[__sync_fetch_and_add(&dist_idx, dist_size)], dist_size);
-      }
+    for(vid_t i = 0; i <= max_v_i + 1; ++i) {
+      data_[i] = dist_offsets[i];
     }
   }
 
   ~bp_dense_dists_t() {
     if (nullptr != dist_buf_) {
-      buf_allocator_.deallocate(dist_buf_, dist_buf_size_);
+      buf_allocator_.deallocate(dist_buf_, data_[max_v_i_ - 1]);
     }
   }
 
@@ -137,7 +127,7 @@ private:
   using buf_allocator_type = typename buf_traits_::allocator_type;
 
   buf_allocator_type buf_allocator_;
-  bp_dist_size_t dist_buf_size_;
+  // bp_dist_size_t dist_buf_size_;
   bp_prob_t* dist_buf_;
 };
 
@@ -239,19 +229,20 @@ public:
       });
     }
 
+    std::shared_ptr<bp_dist_size_t> dist_sizes;
     {
       dist_sizes_allocator_t __alloc(allocator_);
       auto* __p = __alloc.allocate(vertices_);
       memset(__p, 0, sizeof(bp_dist_size_t) * vertices_);
 
-      dist_sizes_.reset(__p, [__alloc, vertices_](dist_sizes_pointer p) mutable {
+      dist_sizes.reset(__p, [__alloc, vertices_](dist_sizes_pointer p) mutable {
         __alloc.deallocate(p, vertices_);
       });
     }
 
-    local_dist_size_ = 0;
-
+    // init local_factors_map_ and dist_sizes
     {
+      // local_dist_size_ = 0;
       plato::bitmap_t<> local_var_map(vertices_);
       traverse_factors_cache_bsp(pvcache,
         [&](plato::vertex_unit_t<bp_factor_data_t>* v_data, plato::bsp_send_callback_t<dist_size_msg_t> send) {
@@ -285,44 +276,65 @@ public:
             CHECK(local_factors_map_->get_bit(v_i) == 0) << "duplicated factor vertex: " << v_i;
             local_factors_map_->set_bit(v_i);
           }
-          dist_sizes_.get()[v_i] = pmsg->dist_size_;
-          __sync_fetch_and_add(&local_dist_size_, pmsg->dist_size_);
+          dist_sizes.get()[v_i] = pmsg->dist_size_;
+          // __sync_fetch_and_add(&local_dist_size_, pmsg->dist_size_);
         });
     }
-    // allreduce(MPI_IN_PLACE, dist_sizes_.get(), vertices_, get_mpi_data_type<bp_dist_size_t>(), MPI_SUM, MPI_COMM_WORLD);
+    allreduce(MPI_IN_PLACE, dist_sizes.get(), vertices_, get_mpi_data_type<bp_dist_size_t>(), MPI_SUM, MPI_COMM_WORLD);
 
     {
-      dist_ptr_allocator_t __alloc(allocator_);
-      auto* __p = __alloc.allocate(vertices_);
-      memset(__p, 0, sizeof(bp_prob_t*) * vertices_);
+      dist_sizes_allocator_t __alloc(allocator_);
+      auto* __p = __alloc.allocate(vertices_ + 1);
+      memset(__p, 0, sizeof(bp_dist_size_t) * (vertices_ + 1));
 
-      dists_.reset(__p, [__alloc, vertices_](dist_ptr_pointer p) mutable {
-        __alloc.deallocate(p, vertices_);
+      dist_offsets_.reset(__p, [__alloc, vertices_](dist_sizes_pointer p) mutable {
+        __alloc.deallocate(p, vertices_ + 1);
       });
     }
+
+    #pragma omp parallel for
+    for (vid_t v_i = 1; v_i <= vertices_; ++v_i) {
+      dist_offsets_.get()[v_i] = dist_sizes.get()[v_i - 1];
+    }
+
+    for (vid_t v_i = 1; v_i <= vertices_; ++v_i) {
+      dist_offsets_.get()[v_i] += dist_offsets_.get()[v_i - 1];
+    }
+    // {
+    //   dist_ptr_allocator_t __alloc(allocator_);
+    //   auto* __p = __alloc.allocate(vertices_);
+    //   memset(__p, 0, sizeof(bp_prob_t*) * vertices_);
+
+    //   dists_.reset(__p, [__alloc, vertices_](dist_ptr_pointer p) mutable {
+    //     __alloc.deallocate(p, vertices_);
+    //   });
+    // }
 
     {
       dist_buf_allocator_t __alloc(allocator_);
-      auto* __p = __alloc.allocate(local_dist_size_);
+      bp_dist_size_t __local_dist_size = dist_offsets_.get()[vertices_];
+      auto* __p = __alloc.allocate(__local_dist_size);
       // initialize the probability distribution to all 1.0
-      std::fill(__p, __p + local_dist_size_, bp_prob_t(1.0));
+      std::fill(__p, __p + __local_dist_size, bp_prob_t(1.0));
 
-      dists_buf_.reset(__p, [__alloc, local_dist_size_](dist_buf_pointer p) mutable {
-        __alloc.deallocate(p, local_dist_size_);
+      dists_buf_.reset(__p, [__alloc, __local_dist_size](dist_buf_pointer p) mutable {
+        __alloc.deallocate(p, __local_dist_size);
       });
     }
 
-    {
-      bp_dist_size_t dist_idx = 0;
-      #pragma omp parallel for
-      for (vid_t v_i = 0; v_i < vertices_; ++v_i) {
-        if (bitmap_->get_bit(v_i)) {
-          dists_.get()[v_i] = dists_buf_.get() + __sync_fetch_and_add(&dist_idx, dist_sizes_.get()[v_i]);
-        }
-      }
-      CHECK(dist_idx == local_dist_size_);
-    }
+    // // init ptr of dists_ to dists_buf_
+    // {
+    //   bp_dist_size_t dist_idx = 0;
+    //   #pragma omp parallel for
+    //   for (vid_t v_i = 0; v_i < vertices_; ++v_i) {
+    //     if (bitmap_->get_bit(v_i)) {
+    //       dists_.get()[v_i] = dists_buf_.get() + __sync_fetch_and_add(&dist_idx, dist_sizes_.get()[v_i]);
+    //     }
+    //   }
+    //   CHECK(dist_idx == local_dist_size_);
+    // }
 
+    // init values of dists_
     {
       msg_bsp_buf_p_.reset(new thread_local_buffer);
       auto msg_buf_reset_defer = plato::defer([msg_bsp_buf_p_] { msg_bsp_buf_p_.reset(); });
@@ -340,9 +352,63 @@ public:
         },
         [&](plato::bsp_recv_pmsg_t<dist_msg_t>& pmsg) {
           vid_t v_i = pmsg->v_i_;
-          CHECK(dist_sizes_.get()[v_i] == pmsg->size_);
-          memcpy(dists_.get()[v_i], pmsg->dist_, sizeof(bp_prob_t) * pmsg->size_);
+          CHECK(pmsg->size_ == dist_offsets_.get()[v_i + 1] - dist_offsets_.get()[v_i]);
+          memcpy(dists_buf_.get() + dist_offsets_.get()[v_i], pmsg->dist_, sizeof(bp_prob_t) * pmsg->size_);
         });
+    }
+
+    std::unique_ptr<bp_dist_size_t> msg_offsets;
+    {
+      dist_sizes_allocator_t __alloc(allocator_);
+      auto* __p = __alloc.allocate(vertices_ + 1);
+      memset(__p, 0, sizeof(bp_dist_size_t) * (vertices_ + 1));
+
+      msg_offsets.reset(__p, [__alloc, vertices_](dist_sizes_pointer p) mutable {
+        __alloc.deallocate(p, vertices_ + 1);
+      });
+    }
+
+    #pragma omp parallel for
+    for (vid_t v_i = 0; v_i < vertices_; ++v_i) {
+      if (bitmap_->get_bit(v_i) == 0) {
+        continue;
+      }
+      bp_dist_size_t msg_size = 0;
+      if (local_factors_map_->get_bit(v_i)) {
+          for (eid_t idx = index_.get()[v_i]; idx < index_.get()[v_i + 1]; ++idx) {
+            vid_t vid = adjs_.get()[idx].neighbour_;
+            msg_size += dist_sizes.get()[vid];
+          }
+      } else {
+        msg_size += dist_sizes.get()[v_i] * (index_.get()[v_i + 1] - index_.get()[v_i]);
+      }
+      msg_offsets.get()[v_i + 1] = msg_size;
+    }
+
+    for (vid_t v_i = 1; v_i <= vertices_; ++v_i) {
+      msg_offsets.get()[v_i] += msg_offsets.get()[v_i - 1];
+    }
+    msg_buf_size_ = msg_offsets.get()[vertices_];
+
+    #pragma omp parallel for
+    for (vid_t v_i = 0; v_i < vertices_; ++v_i) {
+      if (bitmap_->get_bit(v_i) == 0) {
+        continue;
+      }
+      bp_dist_size_t offset = msg_offsets.get()[v_i];
+      if (local_factors_map_->get_bit(v_i)) {
+        for (eid_t idx = index_.get()[v_i]; idx < index_.get()[v_i + 1]; ++idx) {
+          auto& edge = adjs_.get()[idx];
+          edge.edata_.msg_offset_ = offset;
+          offset += dist_sizes.get()[edge.neighbour_];
+        }
+      } else {
+        for (eid_t idx = index_.get()[v_i]; idx < index_.get()[v_i + 1]; ++idx) {
+          auto& edge = adjs_.get()[idx];
+          edge.edata_.msg_offset_ = offset;
+          offset += dist_sizes.get()[v_i];
+        }
+      }
     }
 
     return 0;
@@ -359,13 +425,19 @@ public:
 
   
   bp_dense_dists_t<partition_t> alloc_dist_state() const {
-    return bp_dense_dists_t<partition_t>(dist_sizes_.get(), vertices_ - 1, partitioner_);
+    return bp_dense_dists_t<partition_t>(dist_offsets_.get(), vertices_ - 1, partitioner_);
   }
 
-  void alloc_msg_buf() {
-    if (msg_allocated_) {
-      
-    }
+  std::shared_ptr<bp_prob_t> alloc_msg_buf() const {
+    dist_buf_allocator_t __alloc(allocator_);
+    auto* __p = __alloc.allocate(msg_buf_size_);
+    // initialize the probability distribution to all 1.0
+    std::fill(__p, __p + msg_buf_size_, bp_prob_t(1.0));
+
+    std::shared_ptr<bp_prob_t> msg_buf(__p, [__alloc, msg_buf_size_](dist_buf_pointer p) mutable {
+      __alloc.deallocate(p, msg_buf_size_);
+    });
+    return msg_buf;
   }
 
 private:
@@ -376,23 +448,26 @@ protected:
   using dist_sizes_traits_     = typename traits_::template rebind_traits<bp_dist_size_t>;
   using dist_sizes_pointer     = typename dist_sizes_traits_::pointer;
 
-  using dist_ptr_allocator_t = typename traits_::template rebind_alloc<bp_prob_t*>;
-  using dist_ptr_traits_     = typename traits_::template rebind_traits<bp_prob_t*>;
-  using dist_ptr_pointer     = typename dist_ptr_traits_::pointer;
+  // using dist_ptr_allocator_t = typename traits_::template rebind_alloc<bp_prob_t*>;
+  // using dist_ptr_traits_     = typename traits_::template rebind_traits<bp_prob_t*>;
+  // using dist_ptr_pointer     = typename dist_ptr_traits_::pointer;
 
-  bp_dist_size_t local_dist_size_;
-  std::shared_ptr<bitmap_spec_t>  local_factors_map_;
-  std::shared_ptr<bp_dist_size_t> dist_sizes_;
-  std::shared_ptr<bp_prob_t*>     dists_;
-
-  bool msg_allocated_ = false;
-  bp_dist_size_t local_msg_size_ = 0;
-
-private:
   using dist_buf_allocator_t = typename traits_::template rebind_alloc<bp_prob_t>;
   using dist_buf_traits_     = typename traits_::template rebind_traits<bp_prob_t>;
   using dist_buf_pointer     = typename dist_buf_traits_::pointer;
 
+  std::shared_ptr<bitmap_spec_t>  local_factors_map_;
+  std::shared_ptr<bp_dist_size_t> dist_offsets_;
+  std::shared_ptr<bp_prob_t>      dists_buf_;
+
+  bp_dist_size_t msg_buf_size_;
+
+  // bp_dist_size_t local_dist_size_;
+  // std::shared_ptr<bp_dist_size_t> dist_sizes_;
+  // std::shared_ptr<bp_prob_t*>     dists_;
+
+
+private:
   static std::unique_ptr<plato::thread_local_buffer> msg_bsp_buf_p_;
 
   struct dist_size_msg_t {
@@ -418,9 +493,6 @@ private:
       }
     }
   };
-
-  std::shared_ptr<bp_prob_t> dists_buf_;
-
 };
 
 template <typename ALLOC>
@@ -437,6 +509,8 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
 
   belief_state_t curt_belief = graph.alloc_dist_state();
   belief_state_t next_belief = graph.alloc_dist_state();
+  auto curt_msgs = graph.alloc_msg_buf();
+  auto next_msgs = graph.alloc_msg_buf();
 
   double delta = curt_belief.template foreach<double> (
     [&] (plato::vid_t v_i, bp_dist_t* dval) {
