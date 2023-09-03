@@ -100,25 +100,83 @@ struct bp_dist_t {
 
   bp_dist_t(const bp_dist_t&) = delete;
   bp_dist_t& operator=(const bp_dist_t&) = delete;
+
+  void fill(bp_prob_t value) {
+    if (values_ == nullptr) {
+      return;
+    }
+    for (bp_dist_size_t i = 0; i < size_; ++i) {
+      values_[i] = value;
+    }
+  }
+
+  void clean() {
+    size_ = 0;
+    values_ = nullptr;
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, const bp_dist_t& rhs) {
+    if (!rhs.values_ || rhs.size_ == 0) {
+      os << "[]";
+    } else {
+      os << "[";
+      for (bp_dist_size_t i = 0; i < rhs.size_; ++i) {
+        os << rhs.values_[i] << " ";
+      }
+      os << "]";
+    }
+    return os;
+  }
 };
 
-template <typename PART_IMPL, typename ALLOC = mmap_allocator_t<bp_dist_size_t>, typename BITMAP = bitmap_t<>>
-class bp_dense_dists_t: public dense_state_t<bp_dist_size_t, PART_IMPL, ALLOC, BITMAP> {
+template <typename PART_IMPL, typename ALLOC = mmap_allocator_t<bp_dist_t>, typename BITMAP = bitmap_t<>>
+class bp_dense_dists_t: public dense_state_t<bp_dist_t, PART_IMPL, ALLOC, BITMAP> {
 public:
   bp_dense_dists_t(const bp_dist_size_t* dist_offsets, vid_t max_v_i, std::shared_ptr<partition_t> partitioner) : 
-      dense_state_t<bp_dist_size_t, PART_IMPL, ALLOC, BITMAP>(max_v_i + 1, partitioner), buf_allocator_() {
-    dist_buf_ = buf_allocator_.allocate(dist_offsets[max_v_i + 1]);
-    std::fill(dist_buf_, dist_buf_ + dist_offsets[max_v_i + 1], 1.0);
+      dense_state_t<bp_dist_t, PART_IMPL, ALLOC, BITMAP>(max_v_i, partitioner), 
+      /*buf_allocator_(),*/ dist_buf_size_(dist_offsets[max_v_i + 1]) {
+    
+    dist_buf_ = buf_allocator_.allocate(dist_buf_size_);
+    // std::fill(dist_buf_, dist_buf_ + dist_offsets[max_v_i + 1], 1.0);
     
     #pragma omp parallel for
-    for(vid_t i = 0; i <= max_v_i + 1; ++i) {
-      data_[i] = dist_offsets[i];
+    for(vid_t i = 0; i <= max_v_i; ++i) {
+      data_[i].size_ = dist_offsets[i + 1] - dist_offsets[i];
+      data_[i].values_ = dist_buf_ + dist_offsets[i];
     }
+  }
+
+  void fill(bp_prob_t value) {
+    #pragma omp parallel for
+    for (bp_dist_size_t i = 0; i < dist_buf_size_; ++i) {
+      dist_buf_[i] = value;
+    }
+  }
+
+  bp_dense_dists_t(bp_dense_dists_t&& other)
+      : dense_state_t<bp_dist_t, PART_IMPL, ALLOC, BITMAP>(std::move(other)),
+      buf_allocator_(other.buf_allocator_), dist_buf_size_(other.dist_buf_size_) {
+    
+    dist_buf_       = other.dist_buf_;
+    other.dist_buf_ = nullptr;
+  }
+
+  bp_dense_dists_t& operator=(bp_dense_dists_t&& other) {
+    if (this != &other) {
+      dense_state_t<bp_dist_t, PART_IMPL, ALLOC, BITMAP>::operator=(std::move(other));
+      if (nullptr != dist_buf_) {
+        buf_allocator_.deallocate(dist_buf_, dist_buf_size_);
+      }
+      
+      dist_buf_       = other.dist_buf_;
+      other.dist_buf_ = nullptr;
+    }
+    return *this;
   }
 
   ~bp_dense_dists_t() {
     if (nullptr != dist_buf_) {
-      buf_allocator_.deallocate(dist_buf_, data_[max_v_i_ - 1]);
+      buf_allocator_.deallocate(dist_buf_, dist_buf_size_);
     }
   }
 
@@ -127,7 +185,7 @@ private:
   using buf_allocator_type = typename buf_traits_::allocator_type;
 
   buf_allocator_type buf_allocator_;
-  // bp_dist_size_t dist_buf_size_;
+  bp_dist_size_t dist_buf_size_;
   bp_prob_t* dist_buf_;
 };
 
@@ -138,7 +196,28 @@ enum class bp_vertex_type_t {
 
 template <typename ALLOC = std::allocator<adj_unit_t<bp_edata_t>>>
 class bp_bcsr_t : public bcsr_t<bp_edata_t, sequence_balanced_by_source_t, ALLOC> {
+private:
+  static std::unique_ptr<plato::thread_local_buffer> msg_bsp_buf_p_;
+
 public:
+  struct bp_msg_t {
+    // vid_t     to_;
+    uint32_t  from_idx_;
+    bp_dist_t msg_;
+
+    template<typename Ar>
+    void serialize(Ar &ar) {
+      if (!msg_.values_) {
+        msg_.values_ = (bp_prob_t*)msg_bsp_buf_p_->local();
+      }
+      // ar & to_;
+      ar & from_idx_;
+      ar & msg_.size_;
+      for (uint32_t i = 0; i < msg_.size_; ++i) {
+        ar & msg_.values_[i];
+      }
+    }
+  };
 
   /*
    *
@@ -229,13 +308,12 @@ public:
       });
     }
 
-    std::shared_ptr<bp_dist_size_t> dist_sizes;
     {
       dist_sizes_allocator_t __alloc(allocator_);
       auto* __p = __alloc.allocate(vertices_);
       memset(__p, 0, sizeof(bp_dist_size_t) * vertices_);
 
-      dist_sizes.reset(__p, [__alloc, vertices_](dist_sizes_pointer p) mutable {
+      dist_sizes_.reset(__p, [__alloc, vertices_](dist_sizes_pointer p) mutable {
         __alloc.deallocate(p, vertices_);
       });
     }
@@ -276,43 +354,35 @@ public:
             CHECK(local_factors_map_->get_bit(v_i) == 0) << "duplicated factor vertex: " << v_i;
             local_factors_map_->set_bit(v_i);
           }
-          dist_sizes.get()[v_i] = pmsg->dist_size_;
+          dist_sizes_.get()[v_i] = pmsg->dist_size_;
           // __sync_fetch_and_add(&local_dist_size_, pmsg->dist_size_);
         });
     }
-    allreduce(MPI_IN_PLACE, dist_sizes.get(), vertices_, get_mpi_data_type<bp_dist_size_t>(), MPI_SUM, MPI_COMM_WORLD);
 
     {
       dist_sizes_allocator_t __alloc(allocator_);
       auto* __p = __alloc.allocate(vertices_ + 1);
       memset(__p, 0, sizeof(bp_dist_size_t) * (vertices_ + 1));
 
-      dist_offsets_.reset(__p, [__alloc, vertices_](dist_sizes_pointer p) mutable {
+      local_dist_offsets_.reset(__p, [__alloc, vertices_](dist_sizes_pointer p) mutable {
         __alloc.deallocate(p, vertices_ + 1);
       });
     }
 
     #pragma omp parallel for
     for (vid_t v_i = 1; v_i <= vertices_; ++v_i) {
-      dist_offsets_.get()[v_i] = dist_sizes.get()[v_i - 1];
+      local_dist_offsets_.get()[v_i] = dist_sizes_.get()[v_i - 1];
     }
 
     for (vid_t v_i = 1; v_i <= vertices_; ++v_i) {
-      dist_offsets_.get()[v_i] += dist_offsets_.get()[v_i - 1];
+      local_dist_offsets_.get()[v_i] += local_dist_offsets_.get()[v_i - 1];
     }
-    // {
-    //   dist_ptr_allocator_t __alloc(allocator_);
-    //   auto* __p = __alloc.allocate(vertices_);
-    //   memset(__p, 0, sizeof(bp_prob_t*) * vertices_);
 
-    //   dists_.reset(__p, [__alloc, vertices_](dist_ptr_pointer p) mutable {
-    //     __alloc.deallocate(p, vertices_);
-    //   });
-    // }
+    allreduce(MPI_IN_PLACE, dist_sizes_.get(), vertices_, get_mpi_data_type<bp_dist_size_t>(), MPI_SUM, MPI_COMM_WORLD);
 
     {
       dist_buf_allocator_t __alloc(allocator_);
-      bp_dist_size_t __local_dist_size = dist_offsets_.get()[vertices_];
+      bp_dist_size_t __local_dist_size = local_dist_offsets_.get()[vertices_];
       auto* __p = __alloc.allocate(__local_dist_size);
       // initialize the probability distribution to all 1.0
       std::fill(__p, __p + __local_dist_size, bp_prob_t(1.0));
@@ -321,18 +391,6 @@ public:
         __alloc.deallocate(p, __local_dist_size);
       });
     }
-
-    // // init ptr of dists_ to dists_buf_
-    // {
-    //   bp_dist_size_t dist_idx = 0;
-    //   #pragma omp parallel for
-    //   for (vid_t v_i = 0; v_i < vertices_; ++v_i) {
-    //     if (bitmap_->get_bit(v_i)) {
-    //       dists_.get()[v_i] = dists_buf_.get() + __sync_fetch_and_add(&dist_idx, dist_sizes_.get()[v_i]);
-    //     }
-    //   }
-    //   CHECK(dist_idx == local_dist_size_);
-    // }
 
     // init values of dists_
     {
@@ -352,8 +410,8 @@ public:
         },
         [&](plato::bsp_recv_pmsg_t<dist_msg_t>& pmsg) {
           vid_t v_i = pmsg->v_i_;
-          CHECK(pmsg->size_ == dist_offsets_.get()[v_i + 1] - dist_offsets_.get()[v_i]);
-          memcpy(dists_buf_.get() + dist_offsets_.get()[v_i], pmsg->dist_, sizeof(bp_prob_t) * pmsg->size_);
+          CHECK(pmsg->size_ == local_dist_offsets_.get()[v_i + 1] - local_dist_offsets_.get()[v_i]);
+          memcpy(dists_buf_.get() + local_dist_offsets_.get()[v_i], pmsg->dist_, sizeof(bp_prob_t) * pmsg->size_);
         });
     }
 
@@ -377,10 +435,10 @@ public:
       if (local_factors_map_->get_bit(v_i)) {
           for (eid_t idx = index_.get()[v_i]; idx < index_.get()[v_i + 1]; ++idx) {
             vid_t vid = adjs_.get()[idx].neighbour_;
-            msg_size += dist_sizes.get()[vid];
+            msg_size += dist_sizes_.get()[vid];
           }
       } else {
-        msg_size += dist_sizes.get()[v_i] * (index_.get()[v_i + 1] - index_.get()[v_i]);
+        msg_size += dist_sizes_.get()[v_i] * (index_.get()[v_i + 1] - index_.get()[v_i]);
       }
       msg_offsets.get()[v_i + 1] = msg_size;
     }
@@ -400,13 +458,13 @@ public:
         for (eid_t idx = index_.get()[v_i]; idx < index_.get()[v_i + 1]; ++idx) {
           auto& edge = adjs_.get()[idx];
           edge.edata_.msg_offset_ = offset;
-          offset += dist_sizes.get()[edge.neighbour_];
+          offset += dist_sizes_.get()[edge.neighbour_];
         }
       } else {
         for (eid_t idx = index_.get()[v_i]; idx < index_.get()[v_i + 1]; ++idx) {
           auto& edge = adjs_.get()[idx];
           edge.edata_.msg_offset_ = offset;
-          offset += dist_sizes.get()[v_i];
+          offset += dist_sizes_.get()[v_i];
         }
       }
     }
@@ -422,10 +480,32 @@ public:
     }
     return init_states_from_factors_cache(pvcache);
   }
+ 
+  bool is_factor(vid_t v_i) const {
+    return (local_factors_map_->get_bit(v_i) != 0);
+  }
 
-  
+  bp_dist_size_t dist_size(vid_t v_i) const {
+    return dist_sizes_.get()[v_i];
+  }
+
+  bp_dist_t dist(vid_t v_i) {
+    return bp_dist_t(dists_buf_.get() + local_dist_offsets_.get()[v_i], dist_sizes_.get()[v_i]);
+  }
+
+  adj_unit_list_spec_t adj_list(vid_t v_i) const {
+    eid_t idx_start = index_.get()[v_i];
+    eid_t idx_end   = index_.get()[v_i + 1];
+    return adj_unit_list_spec_t(&adjs_.get()[idx_start], &adjs_.get()[idx_end]);
+  }
+
+  bp_dist_size_t msg_offset(vid_t v_i, uint32_t idx) const {
+    eid_t eidx = index_.get()[v_i] + idx;
+    return adjs_.get()[idx].edata_.msg_offset_;
+  }
+
   bp_dense_dists_t<partition_t> alloc_dist_state() const {
-    return bp_dense_dists_t<partition_t>(dist_offsets_.get(), vertices_ - 1, partitioner_);
+    return bp_dense_dists_t<partition_t>(local_dist_offsets_.get(), vertices_ - 1, partitioner_);
   }
 
   std::shared_ptr<bp_prob_t> alloc_msg_buf() const {
@@ -457,7 +537,8 @@ protected:
   using dist_buf_pointer     = typename dist_buf_traits_::pointer;
 
   std::shared_ptr<bitmap_spec_t>  local_factors_map_;
-  std::shared_ptr<bp_dist_size_t> dist_offsets_;
+  std::shared_ptr<bp_dist_size_t> dist_sizes_;
+  std::shared_ptr<bp_dist_size_t> local_dist_offsets_;
   std::shared_ptr<bp_prob_t>      dists_buf_;
 
   bp_dist_size_t msg_buf_size_;
@@ -468,8 +549,6 @@ protected:
 
 
 private:
-  static std::unique_ptr<plato::thread_local_buffer> msg_bsp_buf_p_;
-
   struct dist_size_msg_t {
     vid_t v_i_;
     bp_vertex_type_t v_type_;
@@ -493,7 +572,50 @@ private:
       }
     }
   };
+
 };
+
+
+void multiply_factor_msg(bp_dist_t& var_belief, const bp_dist_t& factor_msg) {
+  CHECK(var_belief.values_ && factor_msg.values_);
+  CHECK(var_belief.size_ == factor_msg.size_);
+  for (bp_dist_size_t i = 0; i < var_belief.size_; ++i) {
+    var_belief.values_[i] *= factor_msg.values_[i];
+  }
+}
+
+void multiply_variable_msg(bp_dist_t& factor_belief, const bp_dist_t& var_msg,
+                          bp_dist_size_t product) {
+  CHECK(factor_belief.values_ && var_msg.values_);
+  CHECK(factor_belief.size_ % var_msg.size_ == 0);
+  for (bp_dist_size_t i = 0; i < factor_belief.size_; ++i) {
+    bp_dist_size_t idx_in_var = (i / product) % var_msg.size_;
+    factor_belief.values_[i] *= var_msg.values_[idx_in_var];
+  }
+}
+
+
+void divide_factor_msg(const bp_dist_t& var_belief, bp_prob_t* factor_msg, bp_dist_size_t msg_size) {
+  CHECK(var_belief.values_ && factor_msg);
+  CHECK(var_belief.size_ == msg_size);
+  for (bp_dist_size_t i = 0; i < var_belief.size_; ++i) {
+    factor_msg[i] = var_belief.values_[i] / factor_msg[i];
+  }
+}
+
+void divide_variable_msg(const bp_dist_t& factor_belief, bp_prob_t* var_msg, bp_dist_size_t msg_size,
+                        bp_dist_size_t product) {
+  CHECK(factor_belief.values_ && var_msg);
+  CHECK(factor_belief.size_ % msg_size == 0);
+  std::vector<bp_prob_t> sum(msg_size);
+  for (bp_dist_size_t i = 0; i < factor_belief.size_; ++i) {
+    bp_dist_size_t idx_in_var = (i / product) % msg_size;
+    sum[idx_in_var] += factor_belief.values_[i];
+  }
+  for (bp_dist_size_t i = 0; i < msg_size; ++i) {
+    var_msg[i] = sum[i] / var_msg[i];
+  }
+}
 
 template <typename ALLOC>
 bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
@@ -503,23 +625,116 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
   
   using belief_state_t = bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t>;
   using adj_unit_list_spec_t = typename bp_bcsr_t<ALLOC>::adj_unit_list_spec_t;
+  using bp_msg_spec_t = typename bp_bcsr_t<ALLOC>::bp_msg_t;
+  using context_spec_t = plato::mepa_ag_context_t<bp_msg_spec_t>;
+  using message_spec_t = plato::mepa_ag_message_t<bp_msg_spec_t>;
 
   plato::stop_watch_t watch;
   auto& cluster_info = plato::cluster_info_t::get_instance();
 
   belief_state_t curt_belief = graph.alloc_dist_state();
   belief_state_t next_belief = graph.alloc_dist_state();
-  auto curt_msgs = graph.alloc_msg_buf();
-  auto next_msgs = graph.alloc_msg_buf();
+  auto curt_msgs_buf = graph.alloc_msg_buf();
+  auto next_msgs_buf = graph.alloc_msg_buf();
+  bp_prob_t* curt_msgs = curt_msgs_buf.get();
+  bp_prob_t* next_msgs = next_msgs_buf.get();
 
   double delta = curt_belief.template foreach<double> (
-    [&] (plato::vid_t v_i, bp_dist_t* dval) {
+    [&] (vid_t v_i, bp_dist_t* dval) {
+      dval->fill(1.0);
       return 1.0 * dval->size_;
     }
-  )
+  );
 
+  for (uint32_t epoch_i = 0; epoch_i < opts.iteration_; ++epoch_i) {
+    watch.mark("t1");
 
+    next_belief.fill(1.0);
+    plato::aggregate_message<bp_msg_spec_t, int, bp_bcsr_t> (*graph,
+      [&](const context_spec_t& context, vid_t v_i, const adj_unit_list_spec_t& adjs) {
+        bool is_factor = graph.is_factor(v_i);
+        for (uint32_t idx = 0; idx < adjs.end_ - adjs.begin_; ++idx) {
+          auto it = adjs.begin_ + idx;
+          bp_msg_spec_t msg;
+          // msg.to_ = it->neighbour_;
+          msg.from_idx_ = it->edata_.idx_;
+          msg.msg_.size_ = graph.dist_size(is_factor ? it->neighbour_ : v_i);
+          msg.msg_.values_ = curt_msgs[it->edata_.msg_offset_];
+          context.send(message_spec_t{ it->neighbour_, msg });
+        }
+      },
+      [&](int /*p_i*/, message_spec_t& msg) {
+        vid_t v_i = msg.v_i_;
+        uint32_t idx = msg.message_.from_idx;
+        bp_msg_spec_t bp_msg = msg.message_.msg_;
+        if (!graph.is_factor(v_i)) {
+          multiply_factor_msg(next_belief[v_i], bp_msg);
+        } else {
+          bp_dist_size_t product = 1;
+          auto adj_list = graph.adj_list(v_i);
+          for (uint32_t i = 0; i < idx; ++i) {
+            auto it = adj_list.begin_ + i;
+            product *= graph.dist_size(it->neighbour_);
+          }
+          multiply_variable_msg(next_belief[v_i], bp_msg, product);
+        }
+        memcpy(next_msgs + graph.msg_offset(v_i, idx), 
+              bp_msg.values_, bp_msg.size_ * sizeof(bp_prob_t));
+      }
+    );
+    
+    if (opts.iteration_ - 1 == epoch_i) {
+      delta = next_belief.template foreach<double> (
+        [&](vid_t v_i, bp_dist_t* dval) {
+          if (graph.is_factor(v_i)) {
+            dval->clean();
+          } else {
+            dval->multiply(graph.dist(v_i));
+          }
+          return 0;
+        }
+      );
+    } else {
+      delta = next_belief.template foreach<double> (
+        [&] (vid_t v_i, bp_dist_t* dval) {
+          dval->product(graph.dist(v_i));
+          auto adjs = graph.adj_list(v_i);
+          if (!graph.is_factor(v_i)) {
+            for (uint32_t idx = 0; idx < adjs.end_ - adj.begin_; ++idx) {
+              auto it = adjs.begin_ + idx;
+              divide_factor_msg(*dval, next_msgs + it->edata_.msg_offset_,
+                                graph.dist_size(v_i));
+            }
+          } else {
+            bp_dist_size_t product = 1;
+            for (uint32_t idx = 0; idx < adjs.end_ - adj.begin_; ++idx) {
+              auto it = adjs.begin_ + idx;
+              bp_dist_size_t size = graph.dist_size(it->neighbour_);
+              product *= size;
+              divide_var_msg(*dval, next_msgs + it->edata_.msg_offset_,
+                            graph.dist_size(v_i), graph.dist_size(it->neighbour_));
+            }
+          }
+          double d = 0;
+          for (bp_dist_size_t i = 0; i < dval->size_; ++i) {
+            d += fabs(dval->values_[i] - curt_belief[v_i].values_[i]);
+          }
+          return d;
+        }
+      );
 
+      if (opts.eps_ > 0.0 && delta < opts.eps_) {
+        epoch_i = opts.iteration_ - 2;
+      }
+    }    
+    if (0 == cluster_info.partition_id_) {
+      LOG(INFO) << "[epoch-" << epoch_i  << "], delta: " << delta << ", cost: "
+        << watch.show("t1") / 1000.0 << "s";
+    }
+    std::swap(curt_belief, next_belief);
+  }
+
+  return curt_belief;
 }
 
 }}  // namespace algo, namespace plato

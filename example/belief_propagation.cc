@@ -223,7 +223,7 @@ int main(int argc, char** argv) {
   watch.mark("t0");
 
   plato::graph_info_t graph_info;
-  auto pdcsc = create_bp_bcsr_seq_from_path(
+  auto bp_bcsr = create_bp_bcsr_seq_from_path(
     &graph_info, FLAGS_input_factors, plato::edge_format_t::CSV,
     FLAGS_alpha, FLAGS_part_by_in
   );
@@ -232,7 +232,29 @@ int main(int argc, char** argv) {
   opts.iteration_ = FLAGS_iterations;
   opts.eps_       = FLAGS_eps;
 
+  auto beliefs = plato::algo::belief_propagation(*bp_bcsr, graph_info, opts);
 
+  if (0 == cluster_info.partition_id_) {
+    LOG(INFO) << "belief propagation calculation done: " << watch.show("t0") / 1000.0 << "s";
+  }
+
+  watch.mark("t0");
+  {
+    plato::thread_local_fs_output os(FLAGS_output, (boost::format("%04d_") % cluster_info.partition_id_).str(), true);
+
+    beliefs.foreach<int> (
+      [&](plato::vid_t v_i, bp_dist_t* dval) {
+        auto& fs_output = os.local();
+        if (dval->values_) {
+          fs_output << v_i << "," << *dval << "\n";
+        }
+        return 0;
+      }
+    );
+  }
+  if (0 == cluster_info.partition_id_) {
+    LOG(INFO) << "save result cost: " << watch.show("t1") / 1000.0 << "s";
+  } 
 
   return 0;
 }
