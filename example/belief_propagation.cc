@@ -49,8 +49,21 @@ using bp_factor_data_t = plato::algo::bp_factor_data_t;
 using bp_edata_t       = plato::algo::bp_edata_t;
 using bp_bcsr_t        = plato::algo::bp_bcsr_t<>;
 
+/*
+ * parallel load factor vertex data from file system to cache
+ *
+ * \tparam VCACHE       vertices' cache type, can be 'vertex_cache_t' or 'vertex_file_cache_t'
+ *
+ * \param  path         input file path, 'path' can be a file or a directory.
+ *                      'path' can be located on hdfs or posix, distinguish by its prefix.
+ *                      eg: 'hdfs://' means hdfs, '/' means posix, 'wfs://' means wfs
+ * \param  format       file format
+ *
+ * \return loaded factors cache or nullptr
+ **/
 template <template<typename> class VCACHE>
-std::shared_ptr<VCACHE<bp_factor_data_t>> load_factors_cache(const std::string& path, plato::edge_format_t format) {
+std::shared_ptr<VCACHE<bp_factor_data_t>> load_factors_cache(
+    const std::string& path, plato::edge_format_t format) {
 
   auto pvcache = plato::load_vertices_cache<bp_factor_data_t, VCACHE>(
     path, format, [&](bp_factor_data_t* item, char* content) {
@@ -96,9 +109,21 @@ std::shared_ptr<VCACHE<bp_factor_data_t>> load_factors_cache(const std::string& 
   return pvcache;
 }
 
+/*
+ * parallel load edges to cache from factors cache
+ *
+ * \tparam ECACHE    edges' cache type, can be 'edge_block_cache_t' or 'edge_file_cache_t' or
+ *                   'edge_cache_t'
+ * \tparam VCACHE    vertices' cache type
+ *
+ * \param  pvcahe     factor vertices' cache
+ * \param  pginfo     graph info
+ *
+ * \return loaded edges cache or nullptr
+ **/
 template <template<typename, typename> class ECACHE, template<typename> class VCACHE>
 std::shared_ptr<ECACHE<bp_edata_t, plato::vid_t>> load_edges_cache_from_factors_cache(
-    VCACHE<bp_factor_data_t>& pvcache, plato::graph_info_t* pginfo) {
+    plato::graph_info_t* pginfo, VCACHE<bp_factor_data_t>& pvcache) {
 
   plato::eid_t edges = 0;
   plato::bitmap_t<> v_bitmap(std::numeric_limits<vid_t>::max());
@@ -107,19 +132,21 @@ std::shared_ptr<ECACHE<bp_edata_t, plato::vid_t>> load_edges_cache_from_factors_
   auto traversal = [&](size_t, plato::vertex_unit_t<bp_factor_data_t>* v_data) {
     plato::eid_t n_vars = v_data->vdata_.vars_.size();
     v_bitmap.set_bit(v_data->vid_);
-    // use variable vertex to replace factor vertex
+    // use variable vertex to replace factor vertex 
+    // when the factor vertex conect only one variable vertex
     if (n_vars == 1) {
       v_bitmap.set_bit(v_data->vdata_.vars_.front().first);
       return true;
     }
     __sync_fetch_and_add(&edges, n_vars);
     for(uint32_t i = 0; i < n_vars; ++i) {
-      const auto& var = v_data->vdata_.vars_[i];
-      v_bitmap.set_bit(var.first);
+      const auto& var_pair = v_data->vdata_.vars_[i];
+      v_bitmap.set_bit(var_pair.first);
+      // an factor-to-variable edge
       plato::edge_unit_t<bp_edata_t, plato::vid_t> edge;
       edge.src_ = v_data->vid_;
-      edge.dst_ = var.first;
-      // the var's index in factor's adjs
+      edge.dst_ = var_pair.first;
+      // the variable's index in factor's adjs
       edge.edata_.idx_ = i;
       pecache->push_back(edge);
     }
@@ -137,14 +164,33 @@ std::shared_ptr<ECACHE<bp_edata_t, plato::vid_t>> load_edges_cache_from_factors_
   v_bitmap.sync();
 
   if (pginfo) {
-    pginfo->edges_    = edges;
-    pginfo->vertices_ = v_bitmap.count();
-    pginfo->max_v_i_  = v_bitmap.msb();
+    pginfo->is_directed_ = false;
+    pginfo->edges_       = edges;
+    pginfo->vertices_    = v_bitmap.count();
+    pginfo->max_v_i_     = v_bitmap.msb();
   }
 
   return pecache;
 }
 
+/*
+ * create bp_bcsr graph structure with sequence balanced by source partition from file system
+ *
+ * \tparam ECACHE         edges' cache type, can be 'edge_block_cache_t' or 'edge_file_cache_t'
+ *                        or 'edge_cache_t'
+ * \tparam VCACHE         vertices' cache type, can be 'vertex_cache_t' or 'vertex_file_cache_t'
+ * 
+ * \param pgraph_info     this function will fill all fields of graph_info_t during load process.
+ * \param path            input factor vertices file path, 'path' can be a file or a directory.
+ *                        'path' can be located on hdfs or posix, distinguish by its prefix.
+ *                        eg: 'hdfs://' means hdfs, '/' means posix, 'wfs://' means wfs
+ * \param format          file format
+ * \param alpha           vertex's weighted for partition, -1 means use default
+ * \param use_in_degree   use in-degree instead of out degree for partition
+ *
+ * \return
+ *      graph structure in bp_bcsr form
+ **/
 template <template<typename, typename> class ECACHE = plato::edge_block_cache_t, template<typename> class VCACHE = plato::vertex_cache_t>
 std::shared_ptr<bp_bcsr_t> create_bp_bcsr_seq_from_path(
     plato::graph_info_t*  pgraph_info,
@@ -153,16 +199,22 @@ std::shared_ptr<bp_bcsr_t> create_bp_bcsr_seq_from_path(
     int                   alpha = -1,
     bool                  use_in_degree = false) {
 
+  using partition_t = bp_bcsr_t::partition_t;
+
   auto& cluster_info = plato::cluster_info_t::get_instance();
   plato::stop_watch_t watch;
 
   watch.mark("t0");
+  watch.mark("t1");
 
   auto pvcache = load_factors_cache<VCACHE>(path, format);
 
+  if (0 == cluster_info.partition_id_) {
+    LOG(INFO) << "load factors cache cost: " << watch.show("t1") / 1000.0 << "s";
+  }
   watch.mark("t1");
 
-  auto pecache = load_edges_cache_from_factors_cache<ECACHE>(pvcache, pgraph_info);
+  auto pecache = load_edges_cache_from_factors_cache<ECACHE>(pgraph_info, pvcache);
   
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "edges:        " << pgraph_info->edges_;
@@ -189,7 +241,7 @@ std::shared_ptr<bp_bcsr_t> create_bp_bcsr_seq_from_path(
     watch.mark("t1");
 
     plato::eid_t __edges = pgraph_info->edges_;
-    // factor graph is a undirected
+    // factor graph is undirected
     __edges = __edges * 2;
 
     part_bcsr.reset(new partition_t(degrees.data(), pgraph_info->vertices_,
