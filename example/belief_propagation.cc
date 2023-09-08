@@ -126,8 +126,8 @@ std::shared_ptr<ECACHE<bp_edata_t, plato::vid_t>> load_edges_cache_from_factors_
     plato::graph_info_t* pginfo, VCACHE<bp_factor_data_t>& pvcache) {
 
   plato::eid_t edges = 0;
-  plato::bitmap_t<> v_bitmap(std::numeric_limits<vid_t>::max());
-  std::shared_ptr<ECACHE<bp_edata_t, plato::vid_t>> pecache(new ECACHE());
+  plato::bitmap_t<> v_bitmap(std::numeric_limits<plato::vid_t>::max());
+  std::shared_ptr<ECACHE<bp_edata_t, plato::vid_t>> pecache(new ECACHE<bp_edata_t, plato::vid_t>());
 
   auto traversal = [&](size_t, plato::vertex_unit_t<bp_factor_data_t>* v_data) {
     plato::eid_t n_vars = v_data->vdata_.vars_.size();
@@ -214,7 +214,7 @@ std::shared_ptr<bp_bcsr_t> create_bp_bcsr_seq_from_path(
   }
   watch.mark("t1");
 
-  auto pecache = load_edges_cache_from_factors_cache<ECACHE>(pgraph_info, pvcache);
+  auto pecache = load_edges_cache_from_factors_cache<ECACHE>(pgraph_info, *pvcache);
   
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "edges:        " << pgraph_info->edges_;
@@ -230,9 +230,9 @@ std::shared_ptr<bp_bcsr_t> create_bp_bcsr_seq_from_path(
   {
     std::vector<plato::vid_t> degrees;
     if (use_in_degree) {
-      degrees = generate_dense_in_degrees<plato::vid_t>(*pgraph_info, *pecache);
+      degrees = plato::generate_dense_in_degrees<plato::vid_t>(*pgraph_info, *pecache);
     } else {
-      degrees = generate_dense_out_degrees<plato::vid_t>(*pgraph_info, *pecache);
+      degrees = plato::generate_dense_out_degrees<plato::vid_t>(*pgraph_info, *pecache);
     }
 
     if (0 == cluster_info.partition_id_) {

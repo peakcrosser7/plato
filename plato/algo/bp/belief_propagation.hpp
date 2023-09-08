@@ -46,10 +46,7 @@ struct bp_dist_t {
   bp_prob_t*     values_ = nullptr;
 
   bp_dist_t() = default;
-  bp_dist_t(bp_prob_t* values, bp_dist_size_t size): values_(values), size_(size) {}
-
-  bp_dist_t(const bp_dist_t&) = delete;
-  bp_dist_t& operator=(const bp_dist_t&) = delete;
+  bp_dist_t(bp_prob_t* values, bp_dist_size_t size): size_(size), values_(values) {}
 
   void fill(bp_prob_t value) {
     if (values_ != nullptr) {
@@ -133,9 +130,18 @@ private:
   static std::unique_ptr<plato::thread_local_buffer> bsp_msg_buf_p_;
 
 public:
+  using bcsr_spec_t = bcsr_t<bp_edata_t, sequence_balanced_by_source_t, ALLOC>;
+  using bitmap_spec_t = typename bcsr_spec_t::bitmap_spec_t;
 
   // ******************************************************************************* //
   // required types & methods
+
+  using edata_t              = typename bcsr_spec_t::edata_t;
+  using partition_t          = typename bcsr_spec_t::partition_t;
+  using allocator_type       = typename bcsr_spec_t::allocator_type;
+  using edge_unit_spec_t     = typename bcsr_spec_t::edge_unit_spec_t;
+  using adj_unit_spec_t      = typename bcsr_spec_t::adj_unit_spec_t;
+  using adj_unit_list_spec_t = typename bcsr_spec_t::adj_unit_list_spec_t;
 
   struct bp_msg_t {
     // vid_t     to_;
@@ -219,14 +225,14 @@ public:
   }
 
   adj_unit_list_spec_t adj_list(vid_t v_i) const {
-    eid_t idx_start = index_.get()[v_i];
-    eid_t idx_end   = index_.get()[v_i + 1];
-    return adj_unit_list_spec_t(&adjs_.get()[idx_start], &adjs_.get()[idx_end]);
+    eid_t idx_start = this->index_.get()[v_i];
+    eid_t idx_end   = this->index_.get()[v_i + 1];
+    return adj_unit_list_spec_t(&this->adjs_.get()[idx_start], &this->adjs_.get()[idx_end]);
   }
 
   bp_dist_size_t msg_offset(vid_t v_i, uint32_t idx) const {
-    eid_t eidx = index_.get()[v_i] + idx;
-    return adjs_.get()[idx].edata_.msg_offset_;
+    eid_t eidx = this->index_.get()[v_i] + idx;
+    return this->adjs_.get()[eidx].edata_.msg_offset_;
   }
 
   /*
@@ -234,7 +240,7 @@ public:
    * 
    **/
   bp_dense_dists_t<partition_t> alloc_dist_state() const {
-    return bp_dense_dists_t<partition_t>(local_dist_offsets_.get(), vertices_ - 1, partitioner_);
+    return bp_dense_dists_t<partition_t>(local_dist_offsets_.get(), this->vertices_ - 1, this->partitioner_);
   }
 
   /*
@@ -242,18 +248,31 @@ public:
    **/
   std::shared_ptr<bp_prob_t> alloc_msg_buf() const;
 
-  static auto alloc_bsp_msg_buf() {
+  static deferred_action<std::function<void()>> alloc_bsp_msg_buf() {
     // TODO:not sure return is ok
     bsp_msg_buf_p_.reset(new thread_local_buffer);
-    return std::move(plato::defer([bsp_msg_buf_p_] { bsp_msg_buf_p_.reset(); }));
+    std::function<void()> reset_func = [] { bsp_msg_buf_p_.reset(); };
+    return plato::defer(std::move(reset_func));
   }
 
   // ******************************************************************************* //
+
+  bp_bcsr_t(std::shared_ptr<sequence_balanced_by_source_t> partitioner, const allocator_type& alloc = ALLOC());
+
+  bp_bcsr_t(const bp_bcsr_t&) = delete;
+  bp_bcsr_t& operator=(const bp_bcsr_t&) = delete;
 
 private:
   using traits_ = typename std::allocator_traits<ALLOC>::template rebind_traits<adj_unit_t<edata_t>>;
 
 protected:
+  using bitmap_allocator_t = typename bcsr_spec_t::bitmap_allocator_t;
+  using bitmap_pointer     = typename bcsr_spec_t::bitmap_pointer;
+  using adjs_allocator_t   = typename bcsr_spec_t::adjs_allocator_t;
+  using adjs_pointer       = typename bcsr_spec_t::adjs_pointer;
+  using index_allocator_t  = typename bcsr_spec_t::index_allocator_t;
+  using index_pointer      = typename bcsr_spec_t::index_pointer;
+  
   using dist_sizes_allocator_t = typename traits_::template rebind_alloc<bp_dist_size_t>;
   using dist_sizes_traits_     = typename traits_::template rebind_traits<bp_dist_size_t>;
   using dist_sizes_pointer     = typename dist_sizes_traits_::pointer;
@@ -363,11 +382,12 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
     const graph_info_t& graph_info,
     const bp_opts_t& opts = bp_opts_t()) {
   
-  using belief_state_t = bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t>;
-  using adj_unit_list_spec_t = typename bp_bcsr_t<ALLOC>::adj_unit_list_spec_t;
-  using bp_msg_spec_t = typename bp_bcsr_t<ALLOC>::bp_msg_t;
-  using context_spec_t = plato::mepa_ag_context_t<bp_msg_spec_t>;
-  using message_spec_t = plato::mepa_ag_message_t<bp_msg_spec_t>;
+  using bp_bcsr_spect_t = bp_bcsr_t<ALLOC>;
+  using belief_state_t = bp_dense_dists_t<typename bp_bcsr_spect_t::partition_t>;
+  using adj_unit_list_spec_t = typename bp_bcsr_spect_t::adj_unit_list_spec_t;
+  using bp_msg_spec_t = typename bp_bcsr_spect_t::bp_msg_t;
+  using context_spec_t = mepa_ag_context_t<bp_msg_spec_t>;
+  using message_spec_t = mepa_ag_message_t<bp_msg_spec_t>;
 
   plato::stop_watch_t watch;
   auto& cluster_info = plato::cluster_info_t::get_instance();
@@ -391,7 +411,7 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
     watch.mark("t1");
 
     next_belief.fill(1.0);
-    plato::aggregate_message<bp_msg_spec_t, int, bp_bcsr_t> (*graph,
+    plato::aggregate_message<bp_msg_spec_t, int, bp_bcsr_spect_t> (graph,
       [&](const context_spec_t& context, vid_t v_i, const adj_unit_list_spec_t& adjs) {
         bool is_factor = graph.is_factor(v_i);
         for (uint32_t idx = 0; idx < adjs.end_ - adjs.begin_; ++idx) {
@@ -400,13 +420,13 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
           // msg.to_ = it->neighbour_;
           msg.from_idx_ = it->edata_.idx_;
           msg.msg_.size_ = graph.dist_size(is_factor ? it->neighbour_ : v_i);
-          msg.msg_.values_ = curt_msgs[it->edata_.msg_offset_];
+          msg.msg_.values_ = &curt_msgs[it->edata_.msg_offset_];
           context.send(message_spec_t{ it->neighbour_, msg });
         }
       },
       [&](int /*p_i*/, message_spec_t& msg) {
         vid_t v_i = msg.v_i_;
-        uint32_t idx = msg.message_.from_idx;
+        uint32_t idx = msg.message_.from_idx_;
         bp_dist_t bp_msg = msg.message_.msg_;
         if (!graph.is_factor(v_i)) {
           multiply_factor_msg(next_belief[v_i], bp_msg);
@@ -424,7 +444,7 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
         return 0;
       }
     );
-    // TODO: Normalize belief
+
     if (opts.iteration_ - 1 == epoch_i) {
       delta = next_belief.template foreach<double> (
         [&](vid_t v_i, bp_dist_t* dval) {
@@ -440,24 +460,24 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
     } else {
       delta = next_belief.template foreach<double> (
         [&] (vid_t v_i, bp_dist_t* dval) {
-          dval->product(graph.dist(v_i));
+          dval->multiply(graph.dist(v_i));
           auto adjs = graph.adj_list(v_i);
           if (!graph.is_factor(v_i)) {
-            for (uint32_t idx = 0; idx < adjs.end_ - adj.begin_; ++idx) {
+            for (uint32_t idx = 0; idx < adjs.end_ - adjs.begin_; ++idx) {
               auto it = adjs.begin_ + idx;
-              bp_dist_t factor_msg(next_msgs + it->edata_.msg_offset_,
+              bp_dist_t factor_msg(&next_msgs[it->edata_.msg_offset_],
                                 graph.dist_size(v_i));
               divide_factor_msg(*dval, factor_msg);
               factor_msg.normalize();
             }
           } else {
             bp_dist_size_t product = 1;
-            for (uint32_t idx = 0; idx < adjs.end_ - adj.begin_; ++idx) {
+            for (uint32_t idx = 0; idx < adjs.end_ - adjs.begin_; ++idx) {
               auto it = adjs.begin_ + idx;
               bp_dist_size_t size = graph.dist_size(it->neighbour_);
-              bp_dist_t var_msg(next_msgs + it->edata_.msg_offset_, size);
+              bp_dist_t var_msg(&next_msgs[it->edata_.msg_offset_], size);
               product *= size;
-              divide_var_msg(*dval, var_msg, product);
+              divide_variable_msg(*dval, var_msg, product);
               var_msg.normalize();
             }
           }
@@ -518,7 +538,7 @@ std::ostream& operator<<(std::ostream& os, const bp_dist_t& rhs) {
  * 
  * \return  0 -- success, else -- failed
  **/
-template <typename CACHE, typename PART_IMPL, typename DATA, typename MSG>
+template <typename DATA, typename MSG, typename CACHE>
 int traverse_cache_bsp (
     CACHE& cache,
     std::function<void(DATA*, bsp_send_callback_t<MSG>)> trvs_task,
@@ -530,7 +550,7 @@ int traverse_cache_bsp (
   cache.reset_traversal(trvs_opts);
   auto __send = [&](bsp_send_callback_t<MSG> send) {
     size_t local_chunk_size = chunk_size;
-    while (cache.next_chunk([&](size_t, T* data) {
+    while (cache.next_chunk([&](size_t, DATA* data) {
         trvs_task(data, send);
       }, &local_chunk_size)) {}
   };
@@ -552,7 +572,7 @@ int traverse_cache_bsp (
  * traverse the factor vertices' cache by bulk synchronous parallel computation model
  *
  **/ 
-template <template<typename> class VCACHE, typename  PART_IMPL, typename MSG>
+template <typename MSG, template<typename> class VCACHE>
 int traverse_factors_cache_bsp (
     VCACHE<bp_factor_data_t>& pvacahe,
     std::function<void(vertex_unit_t<bp_factor_data_t>*, bsp_send_callback_t<MSG>)> traverse_task,
@@ -568,7 +588,7 @@ int traverse_factors_cache_bsp (
   opts.local_capacity_        = PAGESIZE;
   opts.batch_size_            = 1;
 
-  return traverse_cache_bsp(pvacahe, traverse_task, recv_task, 1, opts);
+  return traverse_cache_bsp<vertex_unit_t<bp_factor_data_t>, MSG>(pvacahe, traverse_task, recv_task, 1, opts);
 }
 
 template <typename PART_IMPL, typename ALLOC, typename BITMAP>
@@ -583,8 +603,8 @@ bp_dense_dists_t<PART_IMPL, ALLOC, BITMAP>::bp_dense_dists_t(
 
   #pragma omp parallel for
   for (vid_t i = 0; i <= max_v_i; ++i) {
-    data_[i].size_ = dist_offsets[i + 1] - dist_offsets[i];
-    data_[i].values_ = dist_buf_ + dist_offsets[i];
+    this->data_[i].size_   = dist_offsets[i + 1] - dist_offsets[i];
+    this->data_[i].values_ = dist_buf_ + dist_offsets[i];
   }
 }
 
@@ -615,34 +635,41 @@ bp_dense_dists_t<PART_IMPL, ALLOC, BITMAP>::operator=(bp_dense_dists_t&& other) 
 }
 
 template <typename ALLOC>
+std::unique_ptr<plato::thread_local_buffer> bp_bcsr_t<ALLOC>::bsp_msg_buf_p_;
+
+template <typename ALLOC>
+bp_bcsr_t<ALLOC>::bp_bcsr_t(std::shared_ptr<sequence_balanced_by_source_t> partitioner, const allocator_type& alloc)
+  : bcsr_spec_t(partitioner, alloc) { }
+
+template <typename ALLOC>
 template <typename ECACHE>
 int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECACHE& pecache, 
     bool from_factor, bool is_vidx) {
-  CHECK(nullptr != partitioner_);
+  CHECK(nullptr != this->partitioner_);
 
   vid_t tmp_vertices = 0;
   eid_t tmp_edges    = 0;
 
-  vertices_    = graph_info.vertices_;
-  tmp_vertices = vertices_;
+  this->vertices_  = graph_info.vertices_;
+  tmp_vertices     = this->vertices_;
 
   {
-    bitmap_allocator_t __alloc(allocator_);
+    bitmap_allocator_t __alloc(this->allocator_);
     auto* __p = __alloc.allocate(1);
-    __alloc.construct(__p, vertices_);
+    __alloc.construct(__p, this->vertices_);
 
-    bitmap_.reset(__p, [__alloc](bitmap_pointer p) mutable {
+    this->bitmap_.reset(__p, [__alloc](bitmap_pointer p) mutable {
       __alloc.destroy(p);
       __alloc.deallocate(p, 1);
     });
   }
 
   {
-    index_allocator_t __alloc(allocator_);
-    auto* __p = __alloc.allocate(vertices_ + 1);
-    memset(__p, 0, sizeof(eid_t) * (vertices_ + 1));
+    index_allocator_t __alloc(this->allocator_);
+    auto* __p = __alloc.allocate(this->vertices_ + 1);
+    memset(__p, 0, sizeof(eid_t) * (this->vertices_ + 1));
 
-    index_.reset(__p, [__alloc, tmp_vertices](index_pointer p) mutable {
+    this->index_.reset(__p, [__alloc, tmp_vertices](index_pointer p) mutable {
       __alloc.deallocate(p, tmp_vertices + 1);
     });
   }
@@ -663,17 +690,17 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
     bsp_opts.batch_size_            = 1;
 
     auto send_srcs = [&](edge_unit_spec_t* edge, bsp_send_callback_t<vid_t> send) {
-      CHECK(edge->src_ < vertices_);
-      CHECK(edge->dst_ < vertices_);
+      CHECK(edge->src_ < this->vertices_);
+      CHECK(edge->dst_ < this->vertices_);
 
-      send(partitioner_->get_partition_id(edge->src_, edge->dst_), edge->src_);
-      send(partitioner_->get_partition_id(edge->dst_, edge->src_), edge->dst_);
+      send(this->partitioner_->get_partition_id(edge->src_, edge->dst_), edge->src_);
+      send(this->partitioner_->get_partition_id(edge->dst_, edge->src_), edge->dst_);
     };
     auto recv_srcs = [&](bsp_recv_pmsg_t<vid_t>& pmsg) {
-      __sync_fetch_and_add(&index_.get()[*pmsg + 1], 1);
-      bitmap_->set_bit(*pmsg);
+      __sync_fetch_and_add(&this->index_.get()[*pmsg + 1], 1);
+      this->bitmap_->set_bit(*pmsg);
     };
-    if (0 != (rc = traverse_cache_bsp(pecache, send_srcs, recv_srcs, 64, bsp_opts, trvs_opts))) {
+    if (0 != (rc = traverse_cache_bsp<edge_unit_spec_t, vid_t>(pecache, send_srcs, recv_srcs, 64, bsp_opts, trvs_opts))) {
       return rc;
     }
   }
@@ -683,23 +710,23 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
   }
 
   // init adjs storage
-  for (size_t i = 1; i <= vertices_; ++i) {
-    index_.get()[i] = index_.get()[i] + index_.get()[i - 1];
+  for (size_t i = 1; i <= this->vertices_; ++i) {
+    this->index_.get()[i] = this->index_.get()[i] + this->index_.get()[i - 1];
   }
-  edges_    = index_.get()[vertices_];
-  tmp_edges = edges_;
+  this->edges_ = this->index_.get()[this->vertices_];
+  tmp_edges    = this->edges_;
 
-  LOG(INFO) << "[staging-1]: [" << cluster_info.partition_id_ << "] local edges(" << edges_ << ")";
+  LOG(INFO) << "[staging-1]: [" << cluster_info.partition_id_ << "] local edges(" << this->edges_ << ")";
 
   {
     mmap_allocator_t<adj_unit_spec_t> __alloc; //use mmap noreserve
-    auto* __p = __alloc.allocate(edges_);
+    auto* __p = __alloc.allocate(this->edges_);
     if (false == std::is_trivial<adj_unit_spec_t>::value) {
-      for (size_t i = 0; i < edges_; ++i) {
+      for (size_t i = 0; i < this->edges_; ++i) {
         __alloc.construct(&__p[i]);
       }
     }
-    adjs_.reset(__p, [__alloc, tmp_edges](adjs_pointer p) mutable {
+    this->adjs_.reset(__p, [__alloc, tmp_edges](adjs_pointer p) mutable {
       if (false == std::is_trivial<adj_unit_spec_t>::value) {
         for (size_t i = 0; i < tmp_edges; ++i) {
           __alloc.destroy(&p[i]);
@@ -710,9 +737,9 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
   }
 
   {  // store edges
-    index_allocator_t __alloc(allocator_);
-    auto* __p = __alloc.allocate(vertices_ + 1);
-    memcpy(__p, index_.get(), sizeof(eid_t) * (vertices_ + 1));
+    index_allocator_t __alloc(this->allocator_);
+    auto* __p = __alloc.allocate(this->vertices_ + 1);
+    memcpy(__p, this->index_.get(), sizeof(eid_t) * (this->vertices_ + 1));
 
     std::shared_ptr<eid_t> tmp_index(__p, [__alloc, tmp_vertices](index_pointer p) mutable {
       __alloc.deallocate(p, tmp_vertices + 1);
@@ -732,19 +759,19 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
         auto reversed_edge = *edge;
         reversed_edge.src_ = edge->dst_;
         reversed_edge.dst_ = edge->src_;
-        send(partitioner_->get_partition_id(edge->dst_, edge->src_), reversed_edge);
+        send(this->partitioner_->get_partition_id(edge->dst_, edge->src_), reversed_edge);
       } else {
-        send(partitioner_->get_partition_id(edge->src_, edge->dst_), *edge);
+        send(this->partitioner_->get_partition_id(edge->src_, edge->dst_), *edge);
       }
     };
     auto recv_edges = [&](bsp_recv_pmsg_t<edge_unit_spec_t>& pmsg) {
       eid_t idx = __sync_fetch_and_add(&tmp_index.get()[pmsg->src_], (eid_t)1);
 
-      auto& nei = adjs_.get()[idx];
+      auto& nei = this->adjs_.get()[idx];
       nei.neighbour_ = pmsg->dst_;
       nei.edata_     = pmsg->edata_;
     };
-    if (0 != (rc = traverse_cache_bsp(pecache, send_edges, recv_edges, 64, bsp_opts, trvs_opts))) {
+    if (0 != (rc = traverse_cache_bsp<edge_unit_spec_t, edge_unit_spec_t>(pecache, send_edges, recv_edges, 64, bsp_opts, trvs_opts))) {
       return rc;
     }
   }
@@ -754,8 +781,8 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
   }
 
   // send factor-to-varibler edges with fidx or variable-to-facto edges with vidx
-  aggregate_message<edge_msg_t>, int, bp_bcsr_t>(*this, 
-    [&](mepa_ag_context_t<edge_msg_t>& context, vid_t v_i, const adj_unit_list_spec_t& adjs) {
+  aggregate_message<edge_msg_t, int, bp_bcsr_t>(*this, 
+    [&](const mepa_ag_context_t<edge_msg_t>& context, vid_t v_i, const adj_unit_list_spec_t& adjs) {
       for (uint32_t idx = 0; idx < adjs.end_ - adjs.begin_; ++idx) {
         auto it = adjs.begin_ + idx;
         // a pair of (varible, fidx) / (factor, vidx)
@@ -769,10 +796,11 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
       }
     },
     [&](int, mepa_ag_message_t<edge_msg_t>& msg) {
-      auto idx = index_.get()[msg.v_i_] + msg.message_.pos_;
-      auto& nei = adjs_.get()[idx];
+      auto idx = this->index_.get()[msg.v_i_] + msg.message_.pos_;
+      auto& nei = this->adjs_.get()[idx];
       nei.neighbour_  = msg.message_.v_i_;   // varible/factor id
       nei.edata_.idx_ = msg.message_.idx_;   // fidx/vidx
+      return 0;
     }
   );
 
@@ -786,10 +814,14 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
 template <typename ALLOC>
 template <typename VCACHE>
 int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
+  auto& cluster_info = cluster_info_t::get_instance();
+
+  vid_t tmp_vertices = this->vertices_;
+
   {
-    bitmap_allocator_t __alloc(allocator_);
+    bitmap_allocator_t __alloc(this->allocator_);
     auto* __p = __alloc.allocate(1);
-    __alloc.construct(__p, vertices_);
+    __alloc.construct(__p, this->vertices_);
 
     local_factors_map_.reset(__p, [__alloc](bitmap_pointer p) mutable {
       __alloc.destroy(p);
@@ -798,38 +830,38 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
   }
 
   {
-    dist_sizes_allocator_t __alloc(allocator_);
-    auto* __p = __alloc.allocate(vertices_);
-    memset(__p, 0, sizeof(bp_dist_size_t) * vertices_);
-
-    dist_sizes_.reset(__p, [__alloc, vertices_](dist_sizes_pointer p) mutable {
-      __alloc.deallocate(p, vertices_);
+    dist_sizes_allocator_t __alloc(this->allocator_);
+    auto* __p = __alloc.allocate(tmp_vertices);
+    memset(__p, 0, sizeof(bp_dist_size_t) * tmp_vertices);
+    
+    dist_sizes_.reset(__p, [__alloc, tmp_vertices](dist_sizes_pointer p) mutable {
+      __alloc.deallocate(p, tmp_vertices);
     });
   }
   
   { // initialize local_factors_map_ and dist_sizes_
-    bitmap_t<> local_var_map(vertices_);
-    traverse_factors_cache_bsp(pvcache,
+    bitmap_t<> local_var_map(this->vertices_);
+    traverse_factors_cache_bsp<dist_size_msg_t>(pvcache,
       [&](vertex_unit_t<bp_factor_data_t>* v_data, bsp_send_callback_t<dist_size_msg_t> send) {
         auto var_size = v_data->vdata_.vars_.size();
         if (var_size > 1) {
           dist_size_msg_t factor_msg;
-          factor_msg.v_i_       = v_data->v_i_;
+          factor_msg.v_i_       = v_data->vid_;
           factor_msg.is_factor_ = true;
           factor_msg.dist_size_ = v_data->vdata_.dists_.size();
-          send(partitioner_->get_partition_id(factor_msg.v_i_), factor_msg);
+          send(this->partitioner_->get_partition_id(factor_msg.v_i_), factor_msg);
         }
         for(const auto& var: v_data->vdata_.vars_) {
           dist_size_msg_t var_msg;
           var_msg.v_i_       = var.first;
           var_msg.is_factor_ = false;
           var_msg.dist_size_ = var.second;
-          send(partitioner_->get_partition_id(var_msg.v_i_), var_msg);
+          send(this->partitioner_->get_partition_id(var_msg.v_i_), var_msg);
         }
       },
       [&](bsp_recv_pmsg_t<dist_size_msg_t>& pmsg) {
         vid_t v_i = pmsg->v_i_;
-        CHECK(bitmap_->get_bit(v_i)) << "vertex " << v_i << " is not in the local graph";
+        CHECK(this->bitmap_->get_bit(v_i)) << "vertex " << v_i << " is not in the local graph";
         if (pmsg->is_factor_ == false) {
           CHECK(local_factors_map_->get_bit(v_i) == 0) << "vertex " << v_i << " is a factor vertex";
           if (local_var_map.get_bit(v_i)) {
@@ -850,30 +882,30 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
   } 
 
   {
-    dist_sizes_allocator_t __alloc(allocator_);
-    auto* __p = __alloc.allocate(vertices_ + 1);
-    memset(__p, 0, sizeof(bp_dist_size_t) * (vertices_ + 1));
+    dist_sizes_allocator_t __alloc(this->allocator_);
+    auto* __p = __alloc.allocate(tmp_vertices + 1);
+    memset(__p, 0, sizeof(bp_dist_size_t) * (tmp_vertices + 1));
 
-    local_dist_offsets_.reset(__p, [__alloc, vertices_](dist_sizes_pointer p) mutable {
-      __alloc.deallocate(p, vertices_ + 1);
+    local_dist_offsets_.reset(__p, [__alloc, tmp_vertices](dist_sizes_pointer p) mutable {
+      __alloc.deallocate(p, tmp_vertices + 1);
     });
   }
 
   #pragma omp parallel for
-  for (vid_t v_i = 1; v_i <= vertices_; ++v_i) {
+  for (vid_t v_i = 1; v_i <= this->vertices_; ++v_i) {
     local_dist_offsets_.get()[v_i] = dist_sizes_.get()[v_i - 1];
   }
 
-  for (vid_t v_i = 1; v_i <= vertices_; ++v_i) {
+  for (vid_t v_i = 1; v_i <= this->vertices_; ++v_i) {
     local_dist_offsets_.get()[v_i] += local_dist_offsets_.get()[v_i - 1];
   }
 
   // sync dist_sizes_ between all partitions after buiding local_dist_offsets_
-  allreduce(MPI_IN_PLACE, dist_sizes_.get(), vertices_, get_mpi_data_type<bp_dist_size_t>(), MPI_SUM, MPI_COMM_WORLD);
+  allreduce(MPI_IN_PLACE, dist_sizes_.get(), this->vertices_, get_mpi_data_type<bp_dist_size_t>(), MPI_SUM, MPI_COMM_WORLD);
 
   {
-    dist_buf_allocator_t __alloc(allocator_);
-    bp_dist_size_t __local_dist_size = local_dist_offsets_.get()[vertices_];
+    dist_buf_allocator_t __alloc(this->allocator_);
+    bp_dist_size_t __local_dist_size = local_dist_offsets_.get()[this->vertices_];
     auto* __p = __alloc.allocate(__local_dist_size);
     // initialize the probability distribution to all 1.0
     std::fill(__p, __p + __local_dist_size, bp_prob_t(1.0));
@@ -885,8 +917,8 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
 
   { // initialize values of local_dists_buf_
     bsp_msg_buf_p_.reset(new thread_local_buffer);
-    auto msg_buf_reset_defer = plato::defer([bsp_msg_buf_p_] { bsp_msg_buf_p_.reset(); });
-    traverse_factors_cache_bsp(pvcache, 
+    auto msg_buf_reset_defer = plato::defer([] { bsp_msg_buf_p_.reset(); });
+    traverse_factors_cache_bsp<dist_msg_t>(pvcache, 
       [&] (plato::vertex_unit_t<bp_factor_data_t>* v_data, plato::bsp_send_callback_t<dist_msg_t> send) {
         dist_msg_t msg;
         msg.size_ = v_data->vdata_.dists_.size();
@@ -897,7 +929,7 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
           // use the variable to replace the factor
           msg.v_i_ = v_data->vdata_.vars_.front().first;
         }
-        send(partitioner_->get_partition_id(msg.v_i_), msg);
+        send(this->partitioner_->get_partition_id(msg.v_i_), msg);
       },
       [&](plato::bsp_recv_pmsg_t<dist_msg_t>& pmsg) {
         vid_t v_i = pmsg->v_i_;
@@ -910,56 +942,56 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
     LOG(INFO) << "[staging-5]: store distributions done.";
   } 
 
-  std::unique_ptr<bp_dist_size_t> local_msg_offsets;
+  std::shared_ptr<bp_dist_size_t> local_msg_offsets;
   {
-    dist_sizes_allocator_t __alloc(allocator_);
-    auto* __p = __alloc.allocate(vertices_ + 1);
-    memset(__p, 0, sizeof(bp_dist_size_t) * (vertices_ + 1));
+    dist_sizes_allocator_t __alloc(this->allocator_);
+    auto* __p = __alloc.allocate(tmp_vertices + 1);
+    memset(__p, 0, sizeof(bp_dist_size_t) * (tmp_vertices + 1));
 
-    local_msg_offsets.reset(__p, [__alloc, vertices_](dist_sizes_pointer p) mutable {
-      __alloc.deallocate(p, vertices_ + 1);
+    local_msg_offsets.reset(__p, [__alloc, tmp_vertices](dist_sizes_pointer p) mutable {
+      __alloc.deallocate(p, tmp_vertices + 1);
     });
   }
 
   #pragma omp parallel for
-  for (vid_t v_i = 0; v_i < vertices_; ++v_i) {
-    if (bitmap_->get_bit(v_i) == 0) {
+  for (vid_t v_i = 0; v_i < this->vertices_; ++v_i) {
+    if (this->bitmap_->get_bit(v_i) == 0) {
       continue;
     }
     bp_dist_size_t msg_size = 0;
     // compute the total buffer size of the vertex's messages to send
     if (local_factors_map_->get_bit(v_i)) {
-        for (eid_t idx = index_.get()[v_i]; idx < index_.get()[v_i + 1]; ++idx) {
-          vid_t vid = adjs_.get()[idx].neighbour_;
+        for (eid_t idx = this->index_.get()[v_i]; idx < this->index_.get()[v_i + 1]; ++idx) {
+          vid_t vid = this->adjs_.get()[idx].neighbour_;
           msg_size += dist_sizes_.get()[vid];
         }
     } else {
-      msg_size += dist_sizes_.get()[v_i] * (index_.get()[v_i + 1] - index_.get()[v_i]);
+      msg_size += dist_sizes_.get()[v_i] * (this->index_.get()[v_i + 1] - this->index_.get()[v_i]);
     }
     local_msg_offsets.get()[v_i + 1] = msg_size;
   }
 
-  for (vid_t v_i = 1; v_i <= vertices_; ++v_i) {
+  for (vid_t v_i = 1; v_i <= this->vertices_; ++v_i) {
     local_msg_offsets.get()[v_i] += local_msg_offsets.get()[v_i - 1];
   }
-  msg_buf_size_ = local_msg_offsets.get()[vertices_];
+  msg_buf_size_ = local_msg_offsets.get()[this->vertices_];
 
   // initialize the msg_offset_ in edata_ of each edge
   #pragma omp parallel for
-  for (vid_t v_i = 0; v_i < vertices_; ++v_i) {
-    if (bitmap_->get_bit(v_i) == 0) {
+  for (vid_t v_i = 0; v_i < this->vertices_; ++v_i) {
+    if (this->bitmap_->get_bit(v_i) == 0) {
       continue;
     }
     bp_dist_size_t offset = local_msg_offsets.get()[v_i];
     if (local_factors_map_->get_bit(v_i)) {
-      for (eid_t idx = index_.get()[v_i]; idx < index_.get()[v_i + 1]; ++idx) {
-        auto& edge = adjs_.get()[idx];
+      for (eid_t idx = this->index_.get()[v_i]; idx < this->index_.get()[v_i + 1]; ++idx) {
+        auto& edge = this->adjs_.get()[idx];
         edge.edata_.msg_offset_ = offset;
         offset += dist_sizes_.get()[edge.neighbour_];
       }
     } else {
-      for (eid_t idx = index_.get()[v_i]; idx < index_.get()[v_i + 1]; ++idx) {
-        auto& edge = adjs_.get()[idx];
+      for (eid_t idx = this->index_.get()[v_i]; idx < this->index_.get()[v_i + 1]; ++idx) {
+        auto& edge = this->adjs_.get()[idx];
         edge.edata_.msg_offset_ = offset;
         offset += dist_sizes_.get()[v_i];
       }
@@ -986,13 +1018,14 @@ int bp_bcsr_t<ALLOC>::load_from_cache(const graph_info_t& graph_info, ECACHE& pe
 
 template <typename ALLOC>
 std::shared_ptr<bp_prob_t> bp_bcsr_t<ALLOC>::alloc_msg_buf() const {
-  dist_buf_allocator_t __alloc(allocator_);
-  auto* __p = __alloc.allocate(msg_buf_size_);
+  dist_buf_allocator_t __alloc(this->allocator_);
+  bp_dist_size_t __msg_buf_size = msg_buf_size_;
+  auto* __p = __alloc.allocate(__msg_buf_size);
   // initialize the probability distribution to all 1.0
-  std::fill(__p, __p + msg_buf_size_, bp_prob_t(1.0));
+  std::fill(__p, __p + __msg_buf_size, bp_prob_t(1.0));
 
-  std::shared_ptr<bp_prob_t> msg_buf(__p, [__alloc, msg_buf_size_](dist_buf_pointer p) mutable {
-    __alloc.deallocate(p, msg_buf_size_);
+  std::shared_ptr<bp_prob_t> msg_buf(__p, [__alloc, __msg_buf_size](dist_buf_pointer p) mutable {
+    __alloc.deallocate(p, __msg_buf_size);
   });
   return msg_buf;
 }
