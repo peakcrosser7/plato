@@ -409,12 +409,19 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
     plato::aggregate_message<bp_msg_spec_t, int, bp_bcsr_spect_t> (graph,
       [&](const context_spec_t& context, vid_t v_i, const adj_unit_list_spec_t& adjs) {
         bool is_factor = graph.is_factor(v_i);
+        bp_dist_size_t product = 1;
         for (uint32_t idx = 0; idx < adjs.end_ - adjs.begin_; ++idx) {
           auto it = adjs.begin_ + idx;
           bp_msg_spec_t msg;
           msg.from_idx_ = it->edata_.idx_;
           msg.msg_.size_ = graph.dist_size(is_factor ? it->neighbour_ : v_i);
           msg.msg_.values_ = &curt_msgs[it->edata_.msg_offset_];
+          if (is_factor) {
+            divide_variable_msg(curt_belief[v_i], msg.msg_, product);
+            product *= msg.msg_.size_;
+          } else {
+            divide_factor_msg(curt_belief[v_i], msg.msg_);
+          }
           context.send(message_spec_t{ it->neighbour_, msg });
         }
       },
@@ -452,30 +459,9 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
         }
       );
     } else {
-      std::string str;
       delta = next_belief.template foreach<double> (
         [&] (vid_t v_i, bp_dist_t* dval) {
           dval->multiply(graph.dist(v_i));
-          auto adjs = graph.adj_list(v_i);
-          if (!graph.is_factor(v_i)) {
-            for (uint32_t idx = 0; idx < adjs.end_ - adjs.begin_; ++idx) {
-              auto it = adjs.begin_ + idx;
-              bp_dist_t factor_msg(&next_msgs[it->edata_.msg_offset_],
-                                graph.dist_size(v_i));
-              divide_factor_msg(*dval, factor_msg);
-              factor_msg.normalize();
-            }
-          } else {
-            bp_dist_size_t product = 1;
-            for (uint32_t idx = 0; idx < adjs.end_ - adjs.begin_; ++idx) {
-              auto it = adjs.begin_ + idx;
-              bp_dist_size_t size = graph.dist_size(it->neighbour_);
-              bp_dist_t var_msg(&next_msgs[it->edata_.msg_offset_], size);
-              divide_variable_msg(*dval, var_msg, product);
-              var_msg.normalize();
-              product *= size;
-            }
-          }
           dval->normalize();
           double d = 0;
           for (bp_dist_size_t i = 0; i < dval->size_; ++i) {
