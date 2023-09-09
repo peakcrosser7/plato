@@ -83,6 +83,20 @@ struct bp_dist_t {
     values_ = nullptr;
   }
 
+  std::string to_string() const {
+    std::string str;
+    if (!values_ || size_ == 0) {
+      str += "";
+    } else {
+      str += "[";
+      for (bp_dist_size_t i = 0; i < size_; ++i) {
+        str += std::to_string(values_[i]) + " ";
+      }
+      str += "]";
+    }
+    return str;
+  }
+
   friend std::ostream& operator<<(std::ostream& os, const bp_dist_t& rhs);
 };
 
@@ -344,7 +358,9 @@ void divide_factor_msg(const bp_dist_t& var_belief, bp_dist_t& factor_msg) {
   CHECK(var_belief.values_ && factor_msg.values_);
   CHECK(var_belief.size_ == factor_msg.size_);
   for (bp_dist_size_t i = 0; i < var_belief.size_; ++i) {
-    factor_msg.values_[i] = var_belief.values_[i] / factor_msg.values_[i];
+    if (factor_msg.values_[i] != 0.0) {
+      factor_msg.values_[i] = var_belief.values_[i] / factor_msg.values_[i];
+    }
   }
 }
 
@@ -396,8 +412,6 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
   belief_state_t next_belief = graph.alloc_dist_state();
   auto curt_msgs_buf = graph.alloc_msg_buf();
   auto next_msgs_buf = graph.alloc_msg_buf();
-  bp_prob_t* curt_msgs = curt_msgs_buf.get();
-  bp_prob_t* next_msgs = next_msgs_buf.get();
 
   double delta = curt_belief.template foreach<double> (
     [&] (vid_t v_i, bp_dist_t* dval) {
@@ -409,6 +423,28 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
   auto msg_buf_reset_defer = graph.alloc_bsp_msg_buf();
   for (uint32_t epoch_i = 0; epoch_i < opts.iteration_; ++epoch_i) {
     watch.mark("t1");
+    bp_prob_t* curt_msgs = curt_msgs_buf.get();
+    bp_prob_t* next_msgs = next_msgs_buf.get();
+
+    // {
+    //   std::string str(">>>DEBUG: ");
+    //   str += "pid:" + std::to_string(cluster_info.partition_id_) + ": "
+    //       + " msgs: [";
+    //   auto traversal = [&](vid_t v_i, const adj_unit_list_spec_t& adjs) {
+    //     bool is_factor = graph.is_factor(v_i);
+    //     for (auto it = adjs.begin_; it != adjs.end_; ++it) {
+    //       bp_dist_t msg(&curt_msgs[it->edata_.msg_offset_], graph.dist_size(is_factor ? it->neighbour_ : v_i));
+    //       str += "(" + std::to_string(v_i) + "->" + std::to_string(it->neighbour_)
+    //           + ":" + msg.to_string() + ")  ";
+    //     }
+    //     return true;
+    //   };
+    //   size_t chunk_size = 1;
+    //   graph.reset_traversal();
+    //   while (graph.next_chunk(traversal, &chunk_size)) {}
+    //   str += "]\n";
+    //   std::cout << str;      
+    // }
 
     next_belief.fill(1.0);
     plato::aggregate_message<bp_msg_spec_t, int, bp_bcsr_spect_t> (graph,
@@ -458,6 +494,7 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
         }
       );
     } else {
+      std::string str;
       delta = next_belief.template foreach<double> (
         [&] (vid_t v_i, bp_dist_t* dval) {
           dval->multiply(graph.dist(v_i));
@@ -476,9 +513,9 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
               auto it = adjs.begin_ + idx;
               bp_dist_size_t size = graph.dist_size(it->neighbour_);
               bp_dist_t var_msg(&next_msgs[it->edata_.msg_offset_], size);
-              product *= size;
               divide_variable_msg(*dval, var_msg, product);
               var_msg.normalize();
+              product *= size;
             }
           }
           dval->normalize();
@@ -493,12 +530,29 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
       if (opts.eps_ > 0.0 && delta < opts.eps_) {
         epoch_i = opts.iteration_ - 2;
       }
-    }    
+    }
+
+    // {
+    //   std::string str(">>>DEBUG-");
+    //   str += std::to_string(cluster_info.partition_id_) + ": ";
+    //   str += "next_belief:[";
+    //   next_belief.reset_traversal();
+    //   auto trvs = [&] (vid_t v_i, bp_dist_t* dval) {
+    //     str += std::to_string(v_i) + "-" + dval->to_string();
+    //     return true;
+    //   };
+    //   size_t chunk_size = 1;
+    //   while (next_belief.next_chunk(trvs, &chunk_size)) {}
+    //   str += "]\n";
+    //   std::cout << str;
+    // }
+
     if (0 == cluster_info.partition_id_) {
       LOG(INFO) << "[epoch-" << epoch_i  << "], delta: " << delta << ", cost: "
         << watch.show("t1") / 1000.0 << "s";
     }
     std::swap(curt_belief, next_belief);
+    std::swap(curt_msgs_buf, next_msgs_buf);
   }
 
   return curt_belief;
@@ -510,13 +564,11 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
 
 std::ostream& operator<<(std::ostream& os, const bp_dist_t& rhs) {
   if (!rhs.values_ || rhs.size_ == 0) {
-    os << "[]";
+    os << " ";
   } else {
-    os << "[";
     for (bp_dist_size_t i = 0; i < rhs.size_; ++i) {
       os << rhs.values_[i] << " ";
     }
-    os << "]";
   }
   return os;
 }
@@ -736,15 +788,18 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
     });
   }
 
-  {  // store edges
+  std::shared_ptr<eid_t> tmp_index;
+  {
     index_allocator_t __alloc(this->allocator_);
     auto* __p = __alloc.allocate(this->vertices_ + 1);
-    memcpy(__p, this->index_.get(), sizeof(eid_t) * (this->vertices_ + 1));
+    memset(__p, 0, sizeof(eid_t) * (this->vertices_ + 1));
 
-    std::shared_ptr<eid_t> tmp_index(__p, [__alloc, tmp_vertices](index_pointer p) mutable {
+    tmp_index.reset(__p, [__alloc, tmp_vertices](index_pointer p) mutable {
       __alloc.deallocate(p, tmp_vertices + 1);
     });
+  }
 
+  {  // store edges
     trvs_opts.auto_release_         = true;
     bsp_opts.threads_               = -1;
     bsp_opts.flying_send_per_node_  = 3;
@@ -764,8 +819,9 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
         send(this->partitioner_->get_partition_id(edge->src_, edge->dst_), *edge);
       }
     };
+
     auto recv_edges = [&](bsp_recv_pmsg_t<edge_unit_spec_t>& pmsg) {
-      eid_t idx = __sync_fetch_and_add(&tmp_index.get()[pmsg->src_], (eid_t)1);
+      eid_t idx = this->index_.get()[pmsg->src_] + __sync_fetch_and_add(&tmp_index.get()[pmsg->src_], (eid_t)1);
 
       auto& nei = this->adjs_.get()[idx];
       nei.neighbour_ = pmsg->dst_;
@@ -776,6 +832,27 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
     }
   }
 
+  // {
+  //   std::string str(">>>DEBUG: ");
+  //   str += "pid:" + std::to_string(cluster_info.partition_id_) + ": "
+  //       + " edges: [";
+  //   auto traversal = [&](vid_t v_i, const adj_unit_list_spec_t& adjs) {
+  //     for (eid_t i = 0; i < tmp_index.get()[v_i]; ++i) {
+  //       eid_t idx = this->index_.get()[v_i] + i;
+  //       auto edge = this->adjs_.get()[idx];
+  //       str += "(" + std::to_string(v_i) + "," + std::to_string(edge.neighbour_)
+  //           + " " + std::to_string(edge.edata_.idx_) + ") ";
+  //     }
+  //     return true;
+  //   };
+  //   size_t chunk_size = 1;
+  //   this->reset_traversal();
+  //   while (this->next_chunk(traversal, &chunk_size)) {}
+  //   str += "]\n";
+  //   std::cout << str;
+  //   // exit(0);
+  // }
+
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "[staging-2]: store first part of edges done.";
   }
@@ -783,7 +860,7 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
   // send factor-to-varibler edges with fidx or variable-to-facto edges with vidx
   aggregate_message<edge_msg_t, int, bp_bcsr_t>(*this, 
     [&](const mepa_ag_context_t<edge_msg_t>& context, vid_t v_i, const adj_unit_list_spec_t& adjs) {
-      for (uint32_t idx = 0; idx < adjs.end_ - adjs.begin_; ++idx) {
+      for (uint32_t idx = 0; idx < tmp_index.get()[v_i]; ++idx) {
         auto it = adjs.begin_ + idx;
         // a pair of (varible, fidx) / (factor, vidx)
         // edge_msg_t edge_pair = std::make_pair(v_i, idx);
@@ -807,6 +884,25 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "[staging-3]: store second part of edges done.";
   }
+
+  // {
+  //   std::string str(">>>DEBUG: ");
+  //   str += "pid:" + std::to_string(cluster_info.partition_id_) + ": "
+  //       + " edges: [";
+  //   auto traversal = [&](vid_t v_i, const adj_unit_list_spec_t& adjs) {
+  //     for (auto it = adjs.begin_; it != adjs.end_; ++it) {
+  //       str += "(" + std::to_string(v_i) + "," + std::to_string(it->neighbour_)
+  //           + " " + std::to_string(it->edata_.idx_) + ") ";
+  //     }
+  //     return true;
+  //   };
+  //   size_t chunk_size = 1;
+  //   this->reset_traversal();
+  //   while (this->next_chunk(traversal, &chunk_size)) {}
+  //   str += "]\n";
+  //   std::cout << str;
+  //   exit(0);
+  // }
 
   return 0;
 }
@@ -844,13 +940,13 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
     traverse_factors_cache_bsp<dist_size_msg_t>(pvcache,
       [&](vertex_unit_t<bp_factor_data_t>* v_data, bsp_send_callback_t<dist_size_msg_t> send) {
         auto var_size = v_data->vdata_.vars_.size();
-        if (var_size > 1) {
-          dist_size_msg_t factor_msg;
-          factor_msg.v_i_       = v_data->vid_;
-          factor_msg.is_factor_ = true;
-          factor_msg.dist_size_ = v_data->vdata_.dists_.size();
-          send(this->partitioner_->get_partition_id(factor_msg.v_i_), factor_msg);
-        }
+
+        dist_size_msg_t factor_msg;
+        factor_msg.v_i_       = v_data->vid_;
+        factor_msg.is_factor_ = true;
+        factor_msg.dist_size_ = var_size == 1 ? 0 : v_data->vdata_.dists_.size();
+        send(this->partitioner_->get_partition_id(factor_msg.v_i_), factor_msg);
+
         for(const auto& var: v_data->vdata_.vars_) {
           dist_size_msg_t var_msg;
           var_msg.v_i_       = var.first;
@@ -861,7 +957,6 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
       },
       [&](bsp_recv_pmsg_t<dist_size_msg_t>& pmsg) {
         vid_t v_i = pmsg->v_i_;
-        CHECK(this->bitmap_->get_bit(v_i)) << "vertex " << v_i << " is not in the local graph";
         if (pmsg->is_factor_ == false) {
           CHECK(local_factors_map_->get_bit(v_i) == 0) << "vertex " << v_i << " is a factor vertex";
           if (local_var_map.get_bit(v_i)) {
@@ -903,6 +998,23 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
   // sync dist_sizes_ between all partitions after buiding local_dist_offsets_
   allreduce(MPI_IN_PLACE, dist_sizes_.get(), this->vertices_, get_mpi_data_type<bp_dist_size_t>(), MPI_SUM, MPI_COMM_WORLD);
 
+  // {
+  //   std::string str(">>>DEBUG-");
+  //   str += std::to_string(cluster_info.partition_id_) + ": ";
+  //   str += "dist_sizes: [";
+  //   for (vid_t i = 0; i < this->vertices_; ++i) {
+  //     str += "(" + std::to_string(i) + "-" + std::to_string(dist_sizes_.get()[i]) + ") ";
+  //   }
+  //   str += "]\n";
+  //   str += "dist_offsets: [";
+  //   for (vid_t i = 0; i <= this->vertices_; ++i) {
+  //     str += std::to_string(local_dist_offsets_.get()[i]) + " ";
+  //   }
+  //   str += "]\n";
+  //   std::cout << str;
+  //   exit(0);
+  // }
+
   {
     dist_buf_allocator_t __alloc(this->allocator_);
     bp_dist_size_t __local_dist_size = local_dist_offsets_.get()[this->vertices_];
@@ -937,6 +1049,25 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
         memcpy(local_dists_buf_.get() + local_dist_offsets_.get()[v_i], pmsg->dist_, sizeof(bp_prob_t) * pmsg->size_);
       });
   }
+
+  // {
+  //   std::string str(">>>DEBUG-");
+  //   str += std::to_string(cluster_info.partition_id_) + ": ";
+  //   str += "dists: [";
+  //   for (vid_t i = 0; i < this->vertices_; ++i) {
+  //     auto start = local_dist_offsets_.get()[i], end = local_dist_offsets_.get()[i + 1];
+  //     if (end - start != 0) {
+  //       str += std::to_string(i) + "-(";
+  //       for (auto idx = start; idx < end; ++idx) {
+  //         str += std::to_string(local_dists_buf_.get()[idx]) + " ";
+  //       }
+  //       str += ") ";
+  //     }
+  //   }
+  //   str += "]\n";
+  //   std::cout << str;
+  //   exit(0); 
+  // }
 
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "[staging-5]: store distributions done.";
@@ -997,6 +1128,26 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
       }
     }
   }
+
+  // {
+  //   std::string str(">>>DEBUG-");
+  //   str += std::to_string(cluster_info.partition_id_) + ": ";
+  //   str += "msg_offsets: [";
+  //   for (vid_t v_i = 0; v_i < this->vertices_; ++v_i) {
+  //     if (this->bitmap_->get_bit(v_i) == 0) {
+  //       continue;
+  //     }
+  //     for (eid_t idx = this->index_.get()[v_i]; idx < this->index_.get()[v_i + 1]; ++idx) {
+  //       auto& edge = this->adjs_.get()[idx];
+  //       str += "(" + std::to_string(v_i) + "," + std::to_string(edge.neighbour_)
+  //           + " " + std::to_string(edge.edata_.msg_offset_)  + ") ";
+  //     }
+  //   }
+  //   str += "]\n";
+  //   str += "total_msg_buf: " + std::to_string(msg_buf_size_) + "\n";
+  //   std::cout << str;
+  //   exit(0);
+  // }
 
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "[staging-6]: initialize the message offset of each edge done.";

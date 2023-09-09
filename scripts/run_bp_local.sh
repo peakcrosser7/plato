@@ -10,7 +10,7 @@ MAIN="$ROOT_DIR/bazel-bin/example/belief_propagation" # process name
 WNUM=4
 WCORES=4
 
-INPUT_FACTORS=${INPUT:="$ROOT_DIR/data/graph/factor_graph_2.csv"}
+INPUT_FACTORS=${INPUT_FACTORS:="$ROOT_DIR/data/graph/factor_graph_2.csv"}
 OUTPUT=${OUTPUT:="/tmp/bp"}
 EPS=${EPS:=0.0001}
 ITERATIONS=${ITERATIONS:=100}
