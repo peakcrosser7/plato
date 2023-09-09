@@ -209,47 +209,12 @@ std::shared_ptr<bp_bcsr_t> create_bp_bcsr_seq_from_path(
 
   auto pvcache = load_factors_cache<VCACHE>(path, format);
 
-  // {
-  //   auto traversal = [&](size_t, plato::vertex_unit_t<bp_factor_data_t>* fdata) {
-  //     std::string str(">>>DEBUG: ");
-  //     str += "fid: " + std::to_string(fdata->vid_) + ", vars: [";
-  //     for (auto p: fdata->vdata_.vars_) {
-  //       str += "(" + std::to_string(p.first) + "," + std::to_string(p.second) + ") ";
-  //     }
-  //     str += "], dist:[";
-  //     for (auto x: fdata->vdata_.dists_) {
-  //       str += std::to_string(x) + " ";
-  //     }
-  //     str += "]\n";
-  //     std::cout << str;
-  //   };
-  //   size_t chunk_size = 1;
-  //   pvcache->reset_traversal();
-  //   while (pvcache->next_chunk(traversal, &chunk_size)) {}
-  //   exit(0);
-  // }
-
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "load factors cache cost: " << watch.show("t1") / 1000.0 << "s";
   }
   watch.mark("t1");
 
   auto pecache = load_edges_cache_from_factors_cache<ECACHE>(pgraph_info, *pvcache);
-
-  {
-    auto traversal = [&](size_t, plato::edge_unit_t<bp_edata_t>* edge) {
-      std::string str;
-      str += "(" + std::to_string(edge->src_) + "," + std::to_string(edge->dst_) 
-          + ", " + std::to_string(edge->edata_.idx_) + ") ";
-      std::cout << str;
-    };
-    size_t chunk_size = 1;
-    pecache->reset_traversal();
-    std::cout << ">>>DEBUG: edges: [";
-    while (pecache->next_chunk(traversal, &chunk_size)) {}
-    std::cout << "]\n";
-    // exit(0);
-  }
   
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "edges:        " << pgraph_info->edges_;

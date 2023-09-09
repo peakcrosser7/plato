@@ -83,20 +83,6 @@ struct bp_dist_t {
     values_ = nullptr;
   }
 
-  std::string to_string() const {
-    std::string str;
-    if (!values_ || size_ == 0) {
-      str += "";
-    } else {
-      str += "[";
-      for (bp_dist_size_t i = 0; i < size_; ++i) {
-        str += std::to_string(values_[i]) + " ";
-      }
-      str += "]";
-    }
-    return str;
-  }
-
   friend std::ostream& operator<<(std::ostream& os, const bp_dist_t& rhs);
 };
 
@@ -133,14 +119,9 @@ private:
   bp_prob_t*         dist_buf_;
 };
 
-enum class bp_vertex_type_t {
-  VARIABLE = 0,
-  FACTOR   = 1
-};
-
 template <typename ALLOC = std::allocator<adj_unit_t<bp_edata_t>>>
 class bp_bcsr_t : public bcsr_t<bp_edata_t, sequence_balanced_by_source_t, ALLOC> {
-private:
+public:
   static std::unique_ptr<plato::thread_local_buffer> bsp_msg_buf_p_;
 
 public:
@@ -158,7 +139,6 @@ public:
   using adj_unit_list_spec_t = typename bcsr_spec_t::adj_unit_list_spec_t;
 
   struct bp_msg_t {
-    // vid_t     to_;
     uint32_t  from_idx_;
     bp_dist_t msg_;
 
@@ -167,7 +147,6 @@ public:
       if (!msg_.values_) {
         msg_.values_ = (bp_prob_t*)bsp_msg_buf_p_->local();
       }
-      // ar & to_;
       ar & from_idx_;
       ar & msg_.size_;
       for (uint32_t i = 0; i < msg_.size_; ++i) {
@@ -250,7 +229,7 @@ public:
   }
 
   /*
-   * allocate a distribution state according to local vertices's distrubution size
+   * allocate a distribution state according to local vertices' distribution
    * 
    **/
   bp_dense_dists_t<partition_t> alloc_dist_state() const {
@@ -258,12 +237,17 @@ public:
   }
 
   /*
-   * allocate a message buffer according to local vertices' and its neighbours' distrubution size
+   * allocate a message buffer according to the local vertices' and its neighbours' distribution size
+   * 
    **/
   std::shared_ptr<bp_prob_t> alloc_msg_buf() const;
 
+  /*
+   * allocate a message buffer for serialization in BSP
+   * 
+   * \return  the deferred action of resetting the buffer when out of scope
+   **/
   static deferred_action<std::function<void()>> alloc_bsp_msg_buf() {
-    // TODO:not sure return is ok
     bsp_msg_buf_p_.reset(new thread_local_buffer);
     std::function<void()> reset_func = [] { bsp_msg_buf_p_.reset(); };
     return plato::defer(std::move(reset_func));
@@ -336,11 +320,6 @@ private:
 };
 
 void multiply_factor_msg(bp_dist_t& var_belief, const bp_dist_t& factor_msg) {
-  // CHECK(var_belief.values_ && factor_msg.values_);
-  // CHECK(var_belief.size_ == factor_msg.size_);
-  // for (bp_dist_size_t i = 0; i < var_belief.size_; ++i) {
-  //   var_belief.values_[i] *= factor_msg.values_[i];
-  // }
   var_belief.multiply(factor_msg);
 }
 
@@ -426,26 +405,6 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
     bp_prob_t* curt_msgs = curt_msgs_buf.get();
     bp_prob_t* next_msgs = next_msgs_buf.get();
 
-    // {
-    //   std::string str(">>>DEBUG: ");
-    //   str += "pid:" + std::to_string(cluster_info.partition_id_) + ": "
-    //       + " msgs: [";
-    //   auto traversal = [&](vid_t v_i, const adj_unit_list_spec_t& adjs) {
-    //     bool is_factor = graph.is_factor(v_i);
-    //     for (auto it = adjs.begin_; it != adjs.end_; ++it) {
-    //       bp_dist_t msg(&curt_msgs[it->edata_.msg_offset_], graph.dist_size(is_factor ? it->neighbour_ : v_i));
-    //       str += "(" + std::to_string(v_i) + "->" + std::to_string(it->neighbour_)
-    //           + ":" + msg.to_string() + ")  ";
-    //     }
-    //     return true;
-    //   };
-    //   size_t chunk_size = 1;
-    //   graph.reset_traversal();
-    //   while (graph.next_chunk(traversal, &chunk_size)) {}
-    //   str += "]\n";
-    //   std::cout << str;      
-    // }
-
     next_belief.fill(1.0);
     plato::aggregate_message<bp_msg_spec_t, int, bp_bcsr_spect_t> (graph,
       [&](const context_spec_t& context, vid_t v_i, const adj_unit_list_spec_t& adjs) {
@@ -453,7 +412,6 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
         for (uint32_t idx = 0; idx < adjs.end_ - adjs.begin_; ++idx) {
           auto it = adjs.begin_ + idx;
           bp_msg_spec_t msg;
-          // msg.to_ = it->neighbour_;
           msg.from_idx_ = it->edata_.idx_;
           msg.msg_.size_ = graph.dist_size(is_factor ? it->neighbour_ : v_i);
           msg.msg_.values_ = &curt_msgs[it->edata_.msg_offset_];
@@ -531,21 +489,6 @@ bp_dense_dists_t<typename bp_bcsr_t<ALLOC>::partition_t> belief_propagation (
         epoch_i = opts.iteration_ - 2;
       }
     }
-
-    // {
-    //   std::string str(">>>DEBUG-");
-    //   str += std::to_string(cluster_info.partition_id_) + ": ";
-    //   str += "next_belief:[";
-    //   next_belief.reset_traversal();
-    //   auto trvs = [&] (vid_t v_i, bp_dist_t* dval) {
-    //     str += std::to_string(v_i) + "-" + dval->to_string();
-    //     return true;
-    //   };
-    //   size_t chunk_size = 1;
-    //   while (next_belief.next_chunk(trvs, &chunk_size)) {}
-    //   str += "]\n";
-    //   std::cout << str;
-    // }
 
     if (0 == cluster_info.partition_id_) {
       LOG(INFO) << "[epoch-" << epoch_i  << "], delta: " << delta << ", cost: "
@@ -648,10 +591,9 @@ bp_dense_dists_t<PART_IMPL, ALLOC, BITMAP>::bp_dense_dists_t(
     const bp_dist_size_t* dist_offsets, vid_t max_v_i,
     std::shared_ptr<PART_IMPL> partitioner)
     : dense_state_t<bp_dist_t, PART_IMPL, ALLOC, BITMAP>(max_v_i, partitioner),
-      /*buf_allocator_(),*/ dist_buf_size_(dist_offsets[max_v_i + 1]) {
+      dist_buf_size_(dist_offsets[max_v_i + 1]) {
     
   dist_buf_ = buf_allocator_.allocate(dist_buf_size_);
-  // std::fill(dist_buf_, dist_buf_ + dist_offsets[max_v_i + 1], 1.0);
 
   #pragma omp parallel for
   for (vid_t i = 0; i <= max_v_i; ++i) {
@@ -832,27 +774,6 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
     }
   }
 
-  // {
-  //   std::string str(">>>DEBUG: ");
-  //   str += "pid:" + std::to_string(cluster_info.partition_id_) + ": "
-  //       + " edges: [";
-  //   auto traversal = [&](vid_t v_i, const adj_unit_list_spec_t& adjs) {
-  //     for (eid_t i = 0; i < tmp_index.get()[v_i]; ++i) {
-  //       eid_t idx = this->index_.get()[v_i] + i;
-  //       auto edge = this->adjs_.get()[idx];
-  //       str += "(" + std::to_string(v_i) + "," + std::to_string(edge.neighbour_)
-  //           + " " + std::to_string(edge.edata_.idx_) + ") ";
-  //     }
-  //     return true;
-  //   };
-  //   size_t chunk_size = 1;
-  //   this->reset_traversal();
-  //   while (this->next_chunk(traversal, &chunk_size)) {}
-  //   str += "]\n";
-  //   std::cout << str;
-  //   // exit(0);
-  // }
-
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "[staging-2]: store first part of edges done.";
   }
@@ -863,7 +784,6 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
       for (uint32_t idx = 0; idx < tmp_index.get()[v_i]; ++idx) {
         auto it = adjs.begin_ + idx;
         // a pair of (varible, fidx) / (factor, vidx)
-        // edge_msg_t edge_pair = std::make_pair(v_i, idx);
         edge_msg_t edge_msg;
         edge_msg.v_i_ = v_i;
         edge_msg.idx_ = idx;
@@ -884,25 +804,6 @@ int bp_bcsr_t<ALLOC>::load_from_edges_cache(const graph_info_t& graph_info, ECAC
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "[staging-3]: store second part of edges done.";
   }
-
-  // {
-  //   std::string str(">>>DEBUG: ");
-  //   str += "pid:" + std::to_string(cluster_info.partition_id_) + ": "
-  //       + " edges: [";
-  //   auto traversal = [&](vid_t v_i, const adj_unit_list_spec_t& adjs) {
-  //     for (auto it = adjs.begin_; it != adjs.end_; ++it) {
-  //       str += "(" + std::to_string(v_i) + "," + std::to_string(it->neighbour_)
-  //           + " " + std::to_string(it->edata_.idx_) + ") ";
-  //     }
-  //     return true;
-  //   };
-  //   size_t chunk_size = 1;
-  //   this->reset_traversal();
-  //   while (this->next_chunk(traversal, &chunk_size)) {}
-  //   str += "]\n";
-  //   std::cout << str;
-  //   exit(0);
-  // }
 
   return 0;
 }
@@ -998,23 +899,6 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
   // sync dist_sizes_ between all partitions after buiding local_dist_offsets_
   allreduce(MPI_IN_PLACE, dist_sizes_.get(), this->vertices_, get_mpi_data_type<bp_dist_size_t>(), MPI_SUM, MPI_COMM_WORLD);
 
-  // {
-  //   std::string str(">>>DEBUG-");
-  //   str += std::to_string(cluster_info.partition_id_) + ": ";
-  //   str += "dist_sizes: [";
-  //   for (vid_t i = 0; i < this->vertices_; ++i) {
-  //     str += "(" + std::to_string(i) + "-" + std::to_string(dist_sizes_.get()[i]) + ") ";
-  //   }
-  //   str += "]\n";
-  //   str += "dist_offsets: [";
-  //   for (vid_t i = 0; i <= this->vertices_; ++i) {
-  //     str += std::to_string(local_dist_offsets_.get()[i]) + " ";
-  //   }
-  //   str += "]\n";
-  //   std::cout << str;
-  //   exit(0);
-  // }
-
   {
     dist_buf_allocator_t __alloc(this->allocator_);
     bp_dist_size_t __local_dist_size = local_dist_offsets_.get()[this->vertices_];
@@ -1049,25 +933,6 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
         memcpy(local_dists_buf_.get() + local_dist_offsets_.get()[v_i], pmsg->dist_, sizeof(bp_prob_t) * pmsg->size_);
       });
   }
-
-  // {
-  //   std::string str(">>>DEBUG-");
-  //   str += std::to_string(cluster_info.partition_id_) + ": ";
-  //   str += "dists: [";
-  //   for (vid_t i = 0; i < this->vertices_; ++i) {
-  //     auto start = local_dist_offsets_.get()[i], end = local_dist_offsets_.get()[i + 1];
-  //     if (end - start != 0) {
-  //       str += std::to_string(i) + "-(";
-  //       for (auto idx = start; idx < end; ++idx) {
-  //         str += std::to_string(local_dists_buf_.get()[idx]) + " ";
-  //       }
-  //       str += ") ";
-  //     }
-  //   }
-  //   str += "]\n";
-  //   std::cout << str;
-  //   exit(0); 
-  // }
 
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "[staging-5]: store distributions done.";
@@ -1128,26 +993,6 @@ int bp_bcsr_t<ALLOC>::init_states_from_factors_cache(VCACHE& pvcache) {
       }
     }
   }
-
-  // {
-  //   std::string str(">>>DEBUG-");
-  //   str += std::to_string(cluster_info.partition_id_) + ": ";
-  //   str += "msg_offsets: [";
-  //   for (vid_t v_i = 0; v_i < this->vertices_; ++v_i) {
-  //     if (this->bitmap_->get_bit(v_i) == 0) {
-  //       continue;
-  //     }
-  //     for (eid_t idx = this->index_.get()[v_i]; idx < this->index_.get()[v_i + 1]; ++idx) {
-  //       auto& edge = this->adjs_.get()[idx];
-  //       str += "(" + std::to_string(v_i) + "," + std::to_string(edge.neighbour_)
-  //           + " " + std::to_string(edge.edata_.msg_offset_)  + ") ";
-  //     }
-  //   }
-  //   str += "]\n";
-  //   str += "total_msg_buf: " + std::to_string(msg_buf_size_) + "\n";
-  //   std::cout << str;
-  //   exit(0);
-  // }
 
   if (0 == cluster_info.partition_id_) {
     LOG(INFO) << "[staging-6]: initialize the message offset of each edge done.";
