@@ -117,7 +117,7 @@ cc_binary (
         "//3rd/boost:boost_iostreams",
 
         "//plato/graph:graph",
-        "//plato/algo/pagerank:trustrank",
+        "//plato/algo/trustrank:trustrank",
     ],
     defines = [
         # "__DCSC_DEBUG__",

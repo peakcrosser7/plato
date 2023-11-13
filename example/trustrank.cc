@@ -10,7 +10,7 @@
 #include "boost/iostreams/filtering_stream.hpp"
 
 #include "plato/graph/graph.hpp"
-#include "plato/algo/pagerank/trustrank.hpp"
+#include "plato/algo/trustrank/trustrank.hpp"
 
 DEFINE_string(input_edges,  "",      "input edges file, in csv format, without edge data");
 DEFINE_string(input_goods,  "",      "input good vertices file, in csv format, each line has a 'vertex_id'");
