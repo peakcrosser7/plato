@@ -10,7 +10,7 @@
 #include "boost/iostreams/filtering_stream.hpp"
 
 #include "plato/graph/graph.hpp"
-#include "plato/algo/pagerank/personalized_pagerank.hpp"
+#include "plato/algo/ppr/personalized_pagerank.hpp"
 
 DEFINE_string(input,       "",      "input file, in csv format, without edge data");
 DEFINE_string(output,      "",      "output directory");
