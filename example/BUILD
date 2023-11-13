@@ -140,7 +140,7 @@ cc_binary (
         "//3rd/boost:boost_iostreams",
 
         "//plato/graph:graph",
-        "//plato/algo/pagerank:personalized_pagerank",
+        "//plato/algo/ppr:personalized_pagerank",
     ],
     defines = [
         # "__DCSC_DEBUG__",
